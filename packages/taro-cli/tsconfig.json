@@ -14,13 +14,16 @@
     "preserveConstEnums": true,
     "removeComments": false,
     "rootDir": "./src",
-    "sourceMap": false,
+    "sourceMap": true,
     "strictNullChecks": true,
     "target": "es2015",
     "traceResolution": false,
-    "types": ["node"]
+    "types": ["node", "jest"]
   },
   "include": [
     "./src"
+  ],
+  "exclude": [
+    "./src/__tests__"
   ]
 }

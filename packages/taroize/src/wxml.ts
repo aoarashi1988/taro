@@ -1,3 +1,4 @@
+/* eslint-disable camelcase */
 import { parse } from 'himalaya-wxml'
 import * as t from 'babel-types'
 import { camelCase, cloneDeep } from 'lodash'
@@ -18,30 +19,30 @@ function buildSlotName (slotName: string) {
   return `render${slotName[0].toUpperCase() + slotName.replace('-', '').slice(1)}`
 }
 
-enum NodeType {
+export enum NodeType {
   Element = 'element',
   Comment = 'comment',
   Text = 'text'
 }
 
-interface Element {
+export interface Element {
   type: NodeType.Element
   tagName: string
-  children: Node[]
+  children: AllKindNode[]
   attributes: Attribute[]
 }
 
-interface Attribute {
+export interface Attribute {
   key: string
   value: string | null
 }
 
-interface Comment {
+export interface Comment {
   type: NodeType.Comment
   content: string
 }
 
-interface Text {
+export interface Text {
   type: NodeType.Text
   content: string
 }
@@ -51,15 +52,15 @@ export interface WXS {
   src: string
 }
 
-type AllKindNode = Element | Comment | Text
-type Node = Element | Text
+export type AllKindNode = Element | Comment | Text
+export type Node = Element | Text
 interface Condition {
   condition: string
   path: NodePath<t.JSXElement>
   tester: t.JSXExpressionContainer
 }
 
-type AttrValue =
+export type AttrValue =
   | t.StringLiteral
   | t.JSXElement
   | t.JSXExpressionContainer
@@ -78,12 +79,13 @@ export interface Wxml {
   refIds: Set<string>
 }
 
-const WX_IF = 'wx:if'
-const WX_ELSE_IF = 'wx:elif'
-const WX_FOR = 'wx:for'
-const WX_FOR_ITEM = 'wx:for-item'
-const WX_FOR_INDEX = 'wx:for-index'
-const WX_KEY = 'wx:key'
+export const WX_IF = 'wx:if'
+export const WX_ELSE_IF = 'wx:elif'
+export const WX_FOR = 'wx:for'
+export const WX_FOR_ITEM = 'wx:for-item'
+export const WX_FOR_INDEX = 'wx:for-index'
+export const WX_KEY = 'wx:key'
+export const WX_ELSE = 'wx:else'
 
 export const wxTemplateCommand = [
   WX_IF,
@@ -120,14 +122,25 @@ export const createWxmlVistor = (
     const jsx = path.findParent(p => p.isJSXElement()) as NodePath<
     t.JSXElement
     >
+
+    // 把 hidden 转换为 wxif
+    if (name.name === 'hidden') {
+      const value = path.get('value') as NodePath<t.JSXExpressionContainer>
+      if (t.isJSXExpressionContainer(value)) {
+        const exclamation = t.unaryExpression('!', value.node.expression)
+        path.set('value', t.jSXExpressionContainer(exclamation))
+        path.set('name', t.jSXIdentifier(WX_IF))
+      }
+    }
+
     const valueCopy = cloneDeep(path.get('value').node)
     transformIf(name.name, path, jsx, valueCopy)
     const loopItem = transformLoop(name.name, path, jsx, valueCopy)
     if (loopItem) {
-      if (loopItem.index) {
+      if (loopItem.index && !refIds.has(loopItem.index)) {
         loopIds.add(loopItem.index)
       }
-      if (loopItem.item) {
+      if (loopItem.item && !refIds.has(loopItem.item)) {
         loopIds.add(loopItem.item)
       }
     }
@@ -140,7 +153,7 @@ export const createWxmlVistor = (
         path.replaceWith(t.jSXIdentifier('key'))
       }
       if (nodeName.startsWith('wx:') && !wxTemplateCommand.includes(nodeName)) {
-        // tslint:disable-next-line
+        // eslint-disable-next-line no-console
         console.log(`未知 wx 作用域属性： ${nodeName}，该属性会被移除掉。`)
         path.parentPath.remove()
       }
@@ -174,7 +187,7 @@ export const createWxmlVistor = (
           JSXAttribute: jsxAttrVisitor,
           JSXIdentifier: renameJSXKey
         })
-        const slotAttr = attrs.find(a => a.node.name.name === 'slot')
+        const slotAttr = attrs.find(a => a.node?.name.name === 'slot')
         if (slotAttr) {
           const slotValue = slotAttr.node.value
           if (slotValue && t.isStringLiteral(slotValue)) {
@@ -234,6 +247,7 @@ export const createWxmlVistor = (
               ...usedComponents
             ])
             const taroImport = buildImportStatement('@tarojs/taro', [], 'Taro')
+            const reactImport = buildImportStatement('react', [], 'React')
             // const withWeappImport = buildImportStatement(
             //   '@tarojs/with-weapp',
             //   [],
@@ -242,6 +256,7 @@ export const createWxmlVistor = (
             const ast = t.file(t.program([]))
             ast.program.body.unshift(
               taroComponentsImport,
+              reactImport,
               taroImport,
               // withWeappImport,
               t.exportDefaultDeclaration(classDecl)
@@ -396,8 +411,16 @@ function getWXS (attrs: t.JSXAttribute[], path: NodePath<t.JSXElement>, imports:
       throw new Error('wxs 如果没有 src 属性，标签内部必须有 wxs 代码。')
     }
     src = './wxs__' + moduleName
+    const ast = parseCode(script.value)
+    traverse(ast, {
+      CallExpression (path) {
+        if (t.isIdentifier(path.node.callee, { name: 'getRegExp' })) {
+          console.warn(codeFrameError(path.node, '请使用 JavaScript 标准正则表达式把这个 getRegExp 函数重构。'))
+        }
+      }
+    })
     imports.push({
-      ast: parseCode(script.value),
+      ast,
       name: moduleName as string,
       wxs: true
     })
@@ -471,6 +494,20 @@ function transformLoop (
         }
       })
 
+    jsx
+      .get('openingElement')
+      .get('attributes')
+      .forEach(p => {
+        const node = p.node
+        if (node.name.name === WX_KEY && t.isStringLiteral(node.value)) {
+          if (node.value.value === '*this') {
+            node.value = t.jSXExpressionContainer(t.identifier(item.value))
+          } else {
+            node.value = t.jSXExpressionContainer(t.memberExpression(t.identifier(item.value), t.identifier(node.value.value)))
+          }
+        }
+      })
+
     const replacement = t.jSXExpressionContainer(
       t.callExpression(
         t.memberExpression(value.expression, t.identifier('map')),
@@ -505,6 +542,9 @@ function transformIf (
   value: AttrValue
 ) {
   if (name !== WX_IF) {
+    return
+  }
+  if (jsx.node.openingElement.attributes.some(a => a.name.name === 'slot')) {
     return
   }
   const conditions: Condition[] = []
@@ -651,10 +691,20 @@ function parseElement (element: Element): t.JSXElement {
         if (content.type === 'expression') {
           isSpread = true
           const str = content.content
+          const strLastIndex = str.length - 1
           if (str.includes('...') && str.includes(',')) {
-            attr.value = `{{${str.slice(1, str.length - 1)}}}`
+            attr.value = `{{${str.slice(1, strLastIndex)}}}`
           } else {
-            attr.value = `{{${str.slice(str.includes('...') ? 4 : 1, str.length - 1)}}}`
+            if (str.includes('...')) {
+              // (...a) => {{a}}
+              attr.value = `{{${str.slice(4, strLastIndex)}}}`
+            } else if (/^\(([A-Za-z]+)\)$/.test(str)) {
+              // (a) => {{a:a}}
+              attr.value = `{{${str.replace(/^\(([A-Za-z]+)\)$/, '$1:$1')}}}`
+            } else {
+              // (a:'a') => {{a:'a'}}
+              attr.value = `{{${str.slice(1, strLastIndex)}}}`
+            }
           }
         } else {
           attr.value = content.content
@@ -677,7 +727,7 @@ function parseElement (element: Element): t.JSXElement {
   )
 }
 
-function removEmptyTextAndComment (nodes: AllKindNode[]) {
+export function removEmptyTextAndComment (nodes: AllKindNode[]) {
   return nodes.filter(node => {
     return node.type === NodeType.Element ||
       (node.type === NodeType.Text && node.content.trim().length !== 0) ||
@@ -699,7 +749,11 @@ function parseText (node: Text, tagName?: string) {
 
 const handlebarsRE = /\{\{((?:.|\n)+?)\}\}/g
 
-function parseContent (content: string) {
+function singleQuote (s: string) {
+  return `'${s}'`
+}
+
+export function parseContent (content: string, single = false): { type: 'raw' | 'expression', content: string } {
   content = content.trim()
   if (!handlebarsRE.test(content)) {
     return {
@@ -718,7 +772,7 @@ function parseContent (content: string) {
     // push text token
     if (index > lastIndex) {
       tokenValue = content.slice(lastIndex, index)
-      tokens.push(JSON.stringify(tokenValue))
+      tokens.push(single ? singleQuote(tokenValue) : JSON.stringify(tokenValue))
     }
     // tag token
     const exp = match[1].trim()
@@ -727,7 +781,7 @@ function parseContent (content: string) {
   }
   if (lastIndex < content.length) {
     tokenValue = content.slice(lastIndex)
-    tokens.push(JSON.stringify(tokenValue))
+    tokens.push(single ? singleQuote(tokenValue) : JSON.stringify(tokenValue))
   }
   return {
     type: 'expression',
@@ -741,20 +795,20 @@ function parseAttribute (attr: Attribute) {
   if (value) {
     if (key === 'class' && value.startsWith('[') && value.endsWith(']')) {
       value = value.slice(1, value.length - 1).replace(',', '')
-      // tslint:disable-next-line
+      // eslint-disable-next-line no-console
       console.log(codeFrameError(attr, 'Taro/React 不支持 class 传入数组，此写法可能无法得到正确的 class'))
     }
     const { type, content } = parseContent(value)
 
     if (type === 'raw') {
-      jsxValue = t.stringLiteral(content.replace(/\"/g, '\''))
+      jsxValue = t.stringLiteral(content.replace(/"/g, '\''))
     } else {
       let expr: t.Expression
       try {
         expr = buildTemplate(content)
       } catch (error) {
         const pureContent = content.slice(1, content.length - 1)
-        if (reserveKeyWords.has(pureContent) && type !== 'raw') {
+        if (reserveKeyWords.has(pureContent)) {
           const err = `转换模板参数： \`${key}: ${value}\` 报错: \`${pureContent}\` 是 JavaScript 保留字，请不要使用它作为值。`
           if (key === WX_KEY) {
             expr = t.stringLiteral('')
@@ -779,17 +833,26 @@ function parseAttribute (attr: Attribute) {
   }
 
   const jsxKey = handleAttrKey(key)
-  if (/^on[A-Z]/.test(jsxKey) && jsxValue && t.isStringLiteral(jsxValue)) {
+  if (/^on[A-Z]/.test(jsxKey) && !(/^catch/.test(key)) && jsxValue && t.isStringLiteral(jsxValue)) {
     jsxValue = t.jSXExpressionContainer(
       t.memberExpression(t.thisExpression(), t.identifier(jsxValue.value))
     )
   }
 
-  if (key.startsWith('catch') && value && (value === 'true' || value.trim() === '')) {
-    jsxValue = t.jSXExpressionContainer(
-      t.memberExpression(t.thisExpression(), t.identifier('privateStopNoop'))
-    )
-    globals.hasCatchTrue = true
+  if (key.startsWith('catch') && value) {
+    if (value === 'true' || value.trim() === '') {
+      jsxValue = t.jSXExpressionContainer(
+        t.memberExpression(t.thisExpression(), t.identifier('privateStopNoop'))
+      )
+      globals.hasCatchTrue = true
+    } else if (t.isStringLiteral(jsxValue)) {
+      jsxValue = t.jSXExpressionContainer(
+        t.callExpression(
+          t.memberExpression(t.memberExpression(t.thisExpression(), t.identifier('privateStopNoop')), t.identifier('bind')),
+          [t.thisExpression(), t.memberExpression(t.thisExpression(), t.identifier(jsxValue.value))]
+        )
+      )
+    }
   }
   return t.jSXAttribute(t.jSXIdentifier(jsxKey), jsxValue)
 }

@@ -1,6 +1,6 @@
-import * as path from 'path';
+import * as path from 'path'
 import { get, mapValues, merge } from 'lodash'
-
+import { FRAMEWORK_MAP } from '@tarojs/helper'
 import { addTrailingSlash, emptyObj } from '../util'
 import {
   getCopyWebpackPlugin,
@@ -9,20 +9,24 @@ import {
   getDevtool,
   getHtmlWebpackPlugin,
   getMiniCssExtractPlugin,
+  getMainPlugin,
   getModule,
   getOutput,
-  getUglifyPlugin,
+  getTerserPlugin,
   processEnvOption
 } from '../util/chain'
 import { BuildConfig } from '../util/types'
 import getBaseChain from './base.conf'
+import { customVueChain } from './vue'
+import { customVue3Chain } from './vue3'
 
 export default function (appPath: string, config: Partial<BuildConfig>): any {
-  const chain = getBaseChain(appPath)
+  const chain = getBaseChain(appPath, config)
   const {
     alias = emptyObj,
     copy,
     entry = emptyObj,
+    entryFileName = 'app',
     output = emptyObj,
     sourceRoot = '',
     outputRoot = 'dist',
@@ -34,6 +38,7 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
     designWidth = 750,
     deviceRatio,
     enableSourceMap = false,
+    sourceMapType,
     enableExtract = true,
 
     defineConstants = emptyObj,
@@ -51,14 +56,23 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
     esnextModules = [],
 
     postcss,
-    babel,
     csso,
-    uglify
+    uglify,
+    terser
   } = config
-
+  const sourceDir = path.join(appPath, sourceRoot)
+  const outputDir = path.join(appPath, outputRoot)
   const isMultiRouterMode = get(router, 'mode') === 'multi'
 
   const plugin: any = {}
+
+  plugin.mainPlugin = getMainPlugin({
+    framework: config.framework,
+    entryFileName,
+    sourceDir,
+    outputDir,
+    routerConfig: router
+  })
 
   if (enableExtract) {
     plugin.miniCssExtractPlugin = getMiniCssExtractPlugin([
@@ -91,9 +105,7 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
 
   plugin.definePlugin = getDefinePlugin([processEnvOption(env), defineConstants])
 
-  const isCssoEnabled = (csso && csso.enable === false)
-    ? false
-    : true
+  const isCssoEnabled = !(csso && csso.enable === false)
 
   if (isCssoEnabled) {
     plugin.cssoWebpackPlugin = getCssoWebpackPlugin([csso ? csso.config : {}])
@@ -102,20 +114,23 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
   const mode = 'production'
 
   const minimizer: any[] = []
-  const isUglifyEnabled = (uglify && uglify.enable === false)
-    ? false
-    : true
+  const uglifyConfig = uglify || terser
+  const isUglifyEnabled = !(uglifyConfig && uglifyConfig.enable === false)
 
   if (isUglifyEnabled) {
-    minimizer.push(getUglifyPlugin([
+    minimizer.push(getTerserPlugin([
       enableSourceMap,
-      uglify ? uglify.config : {}
+      uglifyConfig ? uglifyConfig.config : {}
     ]))
+  }
+
+  if (config.framework === FRAMEWORK_MAP.REACT || config.framework === FRAMEWORK_MAP.NERV) {
+    alias['@tarojs/components$'] = '@tarojs/components/dist-h5/react'
   }
 
   chain.merge({
     mode,
-    devtool: getDevtool(enableSourceMap),
+    devtool: getDevtool({ enableSourceMap, sourceMapType }),
     entry,
     output: getOutput(appPath, [{
       outputRoot,
@@ -140,7 +155,6 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
       esnextModules,
 
       postcss,
-      babel,
       staticDirectory
     }),
     plugin,
@@ -151,5 +165,20 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
       }
     }
   })
+
+  switch (config.framework) {
+    case FRAMEWORK_MAP.VUE:
+      customVueChain(chain, {
+        styleLoaderOption
+      })
+      break
+    case FRAMEWORK_MAP.VUE3:
+      customVue3Chain(chain, {
+        styleLoaderOption
+      })
+      break
+    default:
+  }
+
   return chain
 }

@@ -6,11 +6,15 @@ import { usedComponents } from './global'
 
 const defaultClassName = '_C'
 
-const buildDecorator = (id: t.Identifier | t.ObjectExpression) => t.decorator(
-  t.callExpression(t.identifier('withWeapp'), [id])
-)
+const buildDecorator = (id: t.Identifier | t.ObjectExpression, isApp = false) => {
+  const args: any[] = [id]
+  isApp && args.push(t.booleanLiteral(true))
+  return t.decorator(
+    t.callExpression(t.identifier('withWeapp'), args)
+  )
+}
 
-function replaceIdentifier (callee: NodePath<t.Node>) {
+export function replaceIdentifier (callee: NodePath<t.Node>) {
   if (callee.isIdentifier()) {
     const name = callee.node.name
     if (name === 'getApp' || name === 'getCurrentPages') {
@@ -21,7 +25,7 @@ function replaceIdentifier (callee: NodePath<t.Node>) {
   }
 }
 
-function replaceMemberExpression (callee: NodePath<t.Node>) {
+export function replaceMemberExpression (callee: NodePath<t.Node>) {
   if (callee.isMemberExpression()) {
     const object = callee.get('object')
     if (object.isIdentifier({ name: 'wx' })) {
@@ -33,9 +37,9 @@ function replaceMemberExpression (callee: NodePath<t.Node>) {
 export function parseScript (
   script?: string,
   returned?: t.Expression,
-  json?: t.ObjectExpression,
   wxses: WXS[] = [],
-  refId?: Set<string>
+  refId?: Set<string>,
+  isApp = false
 ) {
   script = script || 'Page({})'
   if (t.isJSXText(returned as any)) {
@@ -69,10 +73,10 @@ export function parseScript (
         classDecl = parsePage(
           path,
           returned || t.nullLiteral(),
-          json,
           componentType,
           refId,
-          wxses
+          wxses,
+          isApp
         )
         ast.program.body.push(
           classDecl,
@@ -95,6 +99,7 @@ export function parseScript (
     ...usedComponents
   ])
   const taroImport = buildImportStatement('@tarojs/taro', [], 'Taro')
+  const reactImport = buildImportStatement('react', [], 'React')
   const withWeappImport = buildImportStatement(
     '@tarojs/with-weapp',
     [],
@@ -102,6 +107,7 @@ export function parseScript (
   )
   ast.program.body.unshift(
     taroComponentsImport,
+    reactImport,
     taroImport,
     withWeappImport,
     ...wxses.filter(wxs => !wxs.src.startsWith('./wxs__')).map(wxs => buildImportStatement(wxs.src, [], wxs.module))
@@ -113,10 +119,10 @@ export function parseScript (
 function parsePage (
   pagePath: NodePath<t.CallExpression>,
   returned: t.Expression,
-  json?: t.ObjectExpression,
   componentType?: string,
   refId?: Set<string>,
-  wxses?: WXS[]
+  wxses?: WXS[],
+  isApp = false
 ) {
   const stateKeys: string[] = []
   pagePath.traverse({
@@ -143,24 +149,29 @@ function parsePage (
     throw codeFrameError(arg.node, `${componentType || '组件'} 的第一个参数必须是一个对象或变量才能转换。`)
   }
 
-  if (json && t.isObjectExpression(json)) {
-    classBody.push(t.classProperty(t.identifier('config'), json))
-  }
-
   const wxsNames = new Set(wxses ? wxses.map(w => w.module) : [])
 
-  const renderFunc = buildRender(returned, stateKeys.filter(s => !wxsNames.has(s)), propsKeys)
+  const renderFunc = buildRender(
+    componentType === 'App'
+      ? t.memberExpression(
+        t.memberExpression(t.thisExpression(), t.identifier('props')),
+        t.identifier('children')
+      )
+      : returned
+    ,
+    stateKeys.filter(s => !wxsNames.has(s)), propsKeys
+  )
 
   const classDecl = t.classDeclaration(
     t.identifier(componentType === 'App' ? 'App' : defaultClassName),
-    t.memberExpression(t.identifier('Taro'), t.identifier('Component')),
+    t.memberExpression(t.identifier('React'), t.identifier('Component')),
     t.classBody(
       classBody.concat(renderFunc)
     ),
     []
   )
 
-  classDecl.decorators = [buildDecorator(arg.node)]
+  classDecl.decorators = [buildDecorator(arg.node, isApp)]
 
   return classDecl
 }

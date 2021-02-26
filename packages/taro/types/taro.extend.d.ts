@@ -1,6 +1,6 @@
 /// <reference types="react" />
 /// <reference path="taro.component.d.ts" />
-/// <reference path="api/network/network.request.d.ts" />
+/// <reference path="api/network/request.d.ts" />
 
 declare namespace Taro {
   // Events
@@ -8,17 +8,17 @@ declare namespace Taro {
     /**
      * 监听一个事件，接受参数
      */
-    on(eventName: string | symbol, listener: (...args: any[]) => void): this
+    on(eventName: string, listener: (...args: any[]) => void): this
 
     /**
      * 添加一个事件监听，并在事件触发完成之后移除Callbacks链
      */
-    once(eventName: string | symbol, listener: (...args: any[]) => void): this
+    once(eventName: string, listener: (...args: any[]) => void): this
 
     /**
      * 取消监听一个事件
      */
-    off(eventName: string | symbol, listener?: (...args: any[]) => void): this
+    off(eventName: string, listener?: (...args: any[]) => void): this
 
     /**
      * 取消监听的所有事件
@@ -28,22 +28,12 @@ declare namespace Taro {
     /**
      * 触发一个事件，传参
      */
-    trigger(eventName: string | symbol, ...args: any[]): boolean
+    trigger(eventName: string, ...args: any[]): boolean
   }
 
   // eventCenter
 
-  namespace eventCenter {
-    function on(eventName: string | symbol, listener: (...args: any[]) => void): void
-
-    function once(eventName: string | symbol, listener: (...args: any[]) => void): void
-
-    function off(eventName: string | symbol, listener?: (...args: any[]) => void): void
-
-    function off(): void
-
-    function trigger(eventName: string | symbol, ...args: any[]): boolean
-  }
+  const eventCenter: Events
 
   // ENV_TYPE
 
@@ -53,10 +43,12 @@ declare namespace Taro {
     RN = 'RN',
     SWAN = 'SWAN',
     ALIPAY = 'ALIPAY',
-    TT = 'TT'
+    TT = 'TT',
+    QQ = 'QQ',
+    JD = 'JD'
   }
 
-  function getEnv(): ENV_TYPE.WEAPP | ENV_TYPE.WEB | ENV_TYPE.RN | ENV_TYPE.ALIPAY | ENV_TYPE.TT | ENV_TYPE.SWAN
+  function getEnv(): ENV_TYPE
 
   function render(component: Component | JSX.Element, element: Element | null): any
 
@@ -73,10 +65,10 @@ declare namespace Taro {
 
   function atMessage(options: AtMessageOptions): void
 
-  function pxTransform(size: number): string
-  function initPxTransform(config: { designWidth: number; deviceRatio: object })
+  function pxTransform(size: number, designWidth?: number): string
+  function initPxTransform(config: { designWidth: number; deviceRatio: object }): void
 
-  interface RequestParams extends request.Param<any> {
+  interface RequestParams extends request.Option<any> {
     [propName: string]: any
   }
 
@@ -101,4 +93,20 @@ declare namespace Taro {
    * 小程序引用插件 JS 接口
    */
   function requirePlugin(pluginName: string): any
+
+  function setIsUsingDiff (flag: boolean)
+
+  interface Current {
+    app: AppInstance | null,
+    router: RouterInfo | null,
+    page: PageInstance | null,
+    onReady: string,
+    onHide: string,
+    onShow: string,
+    preloadData?: Record<any, any>
+  }
+
+  const Current: Current
+
+  function getCurrentInstance(): Current
 }

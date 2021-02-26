@@ -2,7 +2,6 @@ import * as fs from 'fs-extra'
 import * as path from 'path'
 
 import { AppConfig, TabBar } from '@tarojs/taro'
-import chalk from 'chalk'
 import * as prettier from 'prettier'
 import traverse, { NodePath } from 'babel-traverse'
 import * as t from 'babel-types'
@@ -10,34 +9,30 @@ import * as taroize from '@tarojs/taroize'
 import wxTransformer from '@tarojs/transformer-wx'
 import * as postcss from 'postcss'
 import * as unitTransform from 'postcss-taro-unit-transform'
+// import * as inquirer from 'inquirer'
 
 import {
   printLog,
   promoteRelativePath,
   resolveScriptPath,
-  processStyleImports,
-  getPkgVersion,
+  CSS_IMPORT_REG,
   pascalCase,
-  emptyDirectory
-} from '../util'
-import {
-  BUILD_TYPES,
-  MINI_APP_FILES,
+  emptyDirectory,
   processTypeEnum,
   REG_TYPESCRIPT,
   REG_URL,
   REG_IMAGE,
-  IMINI_APP_FILE_TYPE
-} from '../util/constants'
+  chalk
+} from '@tarojs/helper'
 import { generateMinimalEscapeCode } from '../util/astConvert'
 import Creator from '../create/creator'
 import babylonConfig from '../config/babylon'
-import { IPrettierConfig } from '../util/types'
 import { analyzeImportUrl, incrementId } from './helper'
+import { getPkgVersion } from '../util'
 
 const template = require('babel-template')
 
-const prettierJSConfig: IPrettierConfig = {
+const prettierJSConfig: prettier.Options = {
   semi: false,
   singleQuote: true,
   parser: 'babel'
@@ -45,7 +40,7 @@ const prettierJSConfig: IPrettierConfig = {
 
 const OUTPUT_STYLE_EXTNAME = '.scss'
 
-const WX_GLOBAL_FN = new Set<string>(['getApp', 'getCurrentPages', 'requirePlugin'])
+const WX_GLOBAL_FN = new Set<string>(['getApp', 'getCurrentPages', 'requirePlugin', 'Behavior'])
 
 interface IComponent {
   name: string;
@@ -76,12 +71,37 @@ interface ITaroizeOptions {
   rootPath?: string
 }
 
+function processStyleImports (content: string, processFn: (a: string, b: string) => string) {
+  const style: string[] = []
+  const imports: string[] = []
+  const styleReg = new RegExp('.wxss')
+  content = content.replace(CSS_IMPORT_REG, (m, $1, $2) => {
+    if (styleReg.test($2)) {
+      style.push(m)
+      imports.push($2)
+      if (processFn) {
+        return processFn(m, $2)
+      }
+      return ''
+    }
+    if (processFn) {
+      return processFn(m, $2)
+    }
+    return m
+  })
+  return {
+    content,
+    style,
+    imports
+  }
+}
+
 export default class Convertor {
   root: string
   convertRoot: string
   convertDir: string
   importsDir: string
-  fileTypes: IMINI_APP_FILE_TYPE
+  fileTypes: any
   pages: Set<string>
   components: Set<IComponent>
   hadBeenCopyedFiles: Set<string>
@@ -90,15 +110,22 @@ export default class Convertor {
   entryJSPath: string
   entryJSONPath: string
   entryStylePath: string
-  entryJSON: AppConfig
+  entryJSON: AppConfig & {usingComponents?: Record<string, string>}
   entryStyle: string
+  entryUsingComponents: Record<string, string>
+  framework: 'react' | 'vue'
 
   constructor (root) {
     this.root = root
     this.convertRoot = path.join(this.root, 'taroConvert')
     this.convertDir = path.join(this.convertRoot, 'src')
     this.importsDir = path.join(this.convertDir, 'imports')
-    this.fileTypes = MINI_APP_FILES[BUILD_TYPES.WEAPP]
+    this.fileTypes = {
+      TEMPL: '.wxml',
+      STYLE: '.wxss',
+      CONFIG: '.json',
+      SCRIPT: '.js'
+    }
     this.pages = new Set<string>()
     this.components = new Set<IComponent>()
     this.hadBeenCopyedFiles = new Set<string>()
@@ -132,8 +159,7 @@ export default class Convertor {
     outputFilePath,
     importStylePath,
     depComponents,
-    imports = [],
-    isApp = false
+    imports = []
   }: IParseAstOptions): { ast: t.File; scriptFiles: Set<string> } {
     const scriptFiles = new Set<string>()
     // eslint-disable-next-line @typescript-eslint/no-this-alias
@@ -253,7 +279,7 @@ export default class Convertor {
           const lastImport = bodyNode.filter(p => p.isImportDeclaration()).pop()
           const hasTaroImport = bodyNode.some(p => p.isImportDeclaration() && p.node.source.value === '@tarojs/taro')
           if (needInsertImportTaro && !hasTaroImport) {
-            ;(astPath.node as t.Program).body.unshift(
+            (astPath.node as t.Program).body.unshift(
               t.importDeclaration([t.importDefaultSpecifier(t.identifier('Taro'))], t.stringLiteral('@tarojs/taro'))
             )
           }
@@ -328,12 +354,6 @@ export default class Convertor {
                 )
               })
             }
-
-            if (isApp) {
-              ;(astPath.node as t.Program).body.push(
-                template("Taro.render(<App />, document.getElementById('app'))", babylonConfig)()
-              )
-            }
           }
         }
       }
@@ -351,6 +371,18 @@ export default class Convertor {
     this.entryStylePath = path.join(this.root, `app${this.fileTypes.STYLE}`)
     try {
       this.entryJSON = JSON.parse(String(fs.readFileSync(this.entryJSONPath)))
+
+      const using = this.entryJSON.usingComponents
+      if (using && Object.keys(using).length) {
+        for (const key in using) {
+          if (using[key].startsWith('plugin://')) continue
+          const componentPath = using[key]
+          using[key] = path.join(this.root, componentPath)
+        }
+        this.entryUsingComponents = using
+        delete this.entryJSON.usingComponents
+      }
+
       printLog(processTypeEnum.CONVERT, '入口文件', this.generateShowPath(this.entryJSPath))
       printLog(processTypeEnum.CONVERT, '入口配置', this.generateShowPath(this.entryJSONPath))
       if (fs.existsSync(this.entryStylePath)) {
@@ -391,6 +423,7 @@ export default class Convertor {
   }
 
   getSitemapLocation () {
+    // eslint-disable-next-line dot-notation
     const sitemapLocation = this.entryJSON['sitemapLocation']
     if (sitemapLocation) {
       const sitemapFilePath = path.join(this.root, sitemapLocation)
@@ -456,11 +489,39 @@ export default class Convertor {
     return src.replace(this.root, this.convertDir).replace(path.extname(src), extname)
   }
 
+  getConfigFilePath (src: string) {
+    const { dir, name } = path.parse(src)
+    return path.join(dir, name + '.config.js')
+  }
+
+  writeFileToConfig (src: string, json = '{}') {
+    const configSrc = this.getConfigFilePath(src)
+    const code = `export default ${json}`
+    this.writeFileToTaro(configSrc, prettier.format(code, prettierJSConfig))
+  }
+
   generateShowPath (filePath: string): string {
     return filePath
       .replace(path.join(this.root, '/'), '')
       .split(path.sep)
       .join('/')
+  }
+
+  private formatFile (jsCode: string, template = '') {
+    let code = jsCode
+    const config = { ...prettierJSConfig }
+    if (this.framework === 'vue') {
+      code = `
+${template}
+<script>
+${code}
+</script>
+      `
+      config.parser = 'vue'
+      config.semi = false
+      config.htmlWhitespaceSensitivity = 'ignore'
+    }
+    return prettier.format(code, config)
   }
 
   generateEntry () {
@@ -472,7 +533,9 @@ export default class Convertor {
         json: entryJSON,
         script: entryJS,
         path: this.root,
-        rootPath: this.root
+        rootPath: this.root,
+        framework: this.framework,
+        isApp: true
       })
       const { ast, scriptFiles } = this.parseAst({
         ast: taroizeResult.ast,
@@ -484,7 +547,8 @@ export default class Convertor {
         isApp: true
       })
       const jsCode = generateMinimalEscapeCode(ast)
-      this.writeFileToTaro(entryDistJSPath, prettier.format(jsCode, prettierJSConfig))
+      this.writeFileToTaro(entryDistJSPath, jsCode)
+      this.writeFileToConfig(entryDistJSPath, entryJSON)
       printLog(processTypeEnum.GENERATE, '入口文件', this.generateShowPath(entryDistJSPath))
       if (this.entryStyle) {
         this.traverseStyle(this.entryStylePath, this.entryStyle)
@@ -492,6 +556,7 @@ export default class Convertor {
       this.generateScriptFiles(scriptFiles)
       if (this.entryJSON.tabBar) {
         this.generateTabBarIcon(this.entryJSON.tabBar)
+        this.generateCustomTabbar(this.entryJSON.tabBar)
       }
     } catch (err) {
       console.log(err)
@@ -518,6 +583,25 @@ export default class Convertor {
     }
   }
 
+  generateCustomTabbar (tabBar: TabBar) {
+    if (!tabBar.custom) return
+
+    const customTabbarPath = path.join(this.root, 'custom-tab-bar')
+    if (fs.existsSync(customTabbarPath)) {
+      const customTabbarDistPath = this.getDistFilePath(customTabbarPath)
+      this.copyFileToTaro(customTabbarPath, customTabbarDistPath)
+      printLog(processTypeEnum.COPY, '自定义 TabBar', this.generateShowPath(customTabbarDistPath))
+    }
+  }
+
+  private getComponentDest (file: string) {
+    if (this.framework === 'react') {
+      return file
+    }
+
+    return path.join(path.dirname(file), path.basename(file, path.extname(file)) + '.vue')
+  }
+
   traversePages () {
     this.pages.forEach(page => {
       const pagePath = path.join(this.root, page)
@@ -535,24 +619,40 @@ export default class Convertor {
         const param: ITaroizeOptions = {}
         printLog(processTypeEnum.CONVERT, '页面文件', this.generateShowPath(pageJSPath))
 
+        let pageConfig
         if (fs.existsSync(pageConfigPath)) {
           printLog(processTypeEnum.CONVERT, '页面配置', this.generateShowPath(pageConfigPath))
           const pageConfigStr = String(fs.readFileSync(pageConfigPath))
-          const pageConfig = JSON.parse(pageConfigStr)
-          const pageUsingComponnets = pageConfig.usingComponents
-          if (pageUsingComponnets) {
+          pageConfig = JSON.parse(pageConfigStr)
+        } else if (this.entryUsingComponents) {
+          pageConfig = {}
+        }
+        if (pageConfig) {
+          if (this.entryUsingComponents) {
+            pageConfig.usingComponents = {
+              ...pageConfig.usingComponents,
+              ...this.entryUsingComponents
+            }
+          }
+          const pageUsingComponents = pageConfig.usingComponents
+          if (pageUsingComponents) {
             // 页面依赖组件
             const usingComponents = {}
-            Object.keys(pageUsingComponnets).forEach(component => {
-              let componentPath = path.resolve(pageConfigPath, '..', pageUsingComponnets[component])
-              if (!fs.existsSync(resolveScriptPath(componentPath))) {
-                componentPath = path.join(this.root, pageUsingComponnets[component])
-              }
-
-              if (pageUsingComponnets[component].startsWith('plugin://')) {
-                console.log(component)
-                usingComponents[component] = pageUsingComponnets[component]
+            Object.keys(pageUsingComponents).forEach(component => {
+              const unResolveComponentPath: string = pageUsingComponents[component]
+              if (unResolveComponentPath.startsWith('plugin://')) {
+                usingComponents[component] = unResolveComponentPath
               } else {
+                let componentPath
+                if (unResolveComponentPath.startsWith(this.root)) {
+                  componentPath = unResolveComponentPath
+                } else {
+                  componentPath = path.resolve(pageConfigPath, '..', pageUsingComponents[component])
+                  if (!fs.existsSync(resolveScriptPath(componentPath))) {
+                    componentPath = path.join(this.root, pageUsingComponents[component])
+                  }
+                }
+
                 depComponents.add({
                   name: component,
                   path: componentPath
@@ -567,6 +667,7 @@ export default class Convertor {
           }
           param.json = JSON.stringify(pageConfig)
         }
+
         param.script = String(fs.readFileSync(pageJSPath))
         if (fs.existsSync(pageTemplPath)) {
           printLog(processTypeEnum.CONVERT, '页面模板', this.generateShowPath(pageTemplPath))
@@ -579,7 +680,10 @@ export default class Convertor {
         }
         param.path = path.dirname(pageJSPath)
         param.rootPath = this.root
-        const taroizeResult = taroize(param)
+        const taroizeResult = taroize({
+          ...param,
+          framework: this.framework
+        })
         const { ast, scriptFiles } = this.parseAst({
           ast: taroizeResult.ast,
           sourceFilePath: pageJSPath,
@@ -589,7 +693,8 @@ export default class Convertor {
           imports: taroizeResult.imports
         })
         const jsCode = generateMinimalEscapeCode(ast)
-        this.writeFileToTaro(pageDistJSPath, prettier.format(jsCode, prettierJSConfig))
+        this.writeFileToTaro(this.getComponentDest(pageDistJSPath), this.formatFile(jsCode, taroizeResult.template))
+        this.writeFileToConfig(pageDistJSPath, param.json)
         printLog(processTypeEnum.GENERATE, '页面文件', this.generateShowPath(pageDistJSPath))
         if (pageStyle) {
           this.traverseStyle(pageStylePath, pageStyle)
@@ -658,7 +763,10 @@ export default class Convertor {
         }
         param.path = path.dirname(componentJSPath)
         param.rootPath = this.root
-        const taroizeResult = taroize(param)
+        const taroizeResult = taroize({
+          ...param,
+          framework: this.framework
+        })
         const { ast, scriptFiles } = this.parseAst({
           ast: taroizeResult.ast,
           sourceFilePath: componentJSPath,
@@ -670,7 +778,7 @@ export default class Convertor {
           imports: taroizeResult.imports
         })
         const jsCode = generateMinimalEscapeCode(ast)
-        this.writeFileToTaro(componentDistJSPath, prettier.format(jsCode, prettierJSConfig))
+        this.writeFileToTaro(this.getComponentDest(componentDistJSPath), this.formatFile(jsCode, taroizeResult.template))
         printLog(processTypeEnum.GENERATE, '组件文件', this.generateShowPath(componentDistJSPath))
         if (componentStyle) {
           this.traverseStyle(componentStylePath, componentStyle)
@@ -691,15 +799,53 @@ export default class Convertor {
     return postcssResult
   }
 
+  processStyleAssets (content: string, stylePath: string, styleDist: string) {
+    const reg = /url\(["'](.+?)["']\)/g
+    let token = reg.exec(content)
+    stylePath = path.dirname(stylePath)
+    styleDist = path.dirname(styleDist)
+
+    while (token?.length) {
+      let url = token[1]
+
+      if (
+        url &&
+        url.indexOf('data:') !== 0 &&
+        url.indexOf('#') !== 0 &&
+        !(/^[a-z]+:\/\//.test(url))
+      ) {
+        url = url.trim()
+        url.replace(/[/\\]/g, path.sep)
+        url = url.split('?')[0]
+        url = url.split('#')[0]
+
+        const originPath = path.resolve(stylePath, url)
+        const destPath = path.resolve(styleDist, url)
+        const destDir = path.dirname(destPath)
+
+        if (!fs.existsSync(originPath)) {
+          printLog(processTypeEnum.WARNING, '静态资源', `找不到资源：${originPath}`)
+        } else if (!fs.existsSync(destPath)) {
+          fs.ensureDirSync(destDir)
+          fs.copyFile(originPath, destPath)
+          printLog(processTypeEnum.COPY, '样式资源', this.generateShowPath(destPath))
+        }
+      }
+
+      token = reg.exec(content)
+    }
+  }
+
   async traverseStyle (filePath: string, style: string) {
-    const { imports, content } = processStyleImports(style, BUILD_TYPES.WEAPP, (str, stylePath) => {
+    const { imports, content } = processStyleImports(style, (str, stylePath) => {
       let relativePath = stylePath
       if (path.isAbsolute(relativePath)) {
         relativePath = promoteRelativePath(path.relative(filePath, path.join(this.root, stylePath)))
       }
-      return str.replace(stylePath, relativePath).replace(MINI_APP_FILES[BUILD_TYPES.WEAPP].STYLE, OUTPUT_STYLE_EXTNAME)
+      return str.replace(stylePath, relativePath).replace('.wxss', OUTPUT_STYLE_EXTNAME)
     })
     const styleDist = this.getDistFilePath(filePath, OUTPUT_STYLE_EXTNAME)
+    this.processStyleAssets(content, filePath, styleDist)
     const { css } = await this.styleUnitTransform(filePath, content)
     this.writeFileToTaro(styleDist, css)
     printLog(processTypeEnum.GENERATE, '样式文件', this.generateShowPath(styleDist))
@@ -726,28 +872,40 @@ export default class Convertor {
     const version = getPkgVersion()
     const dateObj = new Date()
     const date = `${dateObj.getFullYear()}-${dateObj.getMonth() + 1}-${dateObj.getDate()}`
-    creator.template(templateName, 'package.json', pkgPath, {
+    creator.template(templateName, 'package.json.tmpl', pkgPath, {
       description,
       projectName,
       version,
       css: 'sass',
       typescript: false,
-      template: templateName
+      template: templateName,
+      framework: this.framework
     })
     creator.template(templateName, path.join('config', 'index.js'), path.join(configDir, 'index.js'), {
       date,
-      projectName
+      projectName,
+      framework: this.framework
     })
-    creator.template(templateName, path.join('config', 'dev.js'), path.join(configDir, 'dev.js'))
-    creator.template(templateName, path.join('config', 'prod.js'), path.join(configDir, 'prod.js'))
+    creator.template(templateName, path.join('config', 'dev.js'), path.join(configDir, 'dev.js'), {
+      framework: this.framework
+    })
+    creator.template(templateName, path.join('config', 'prod.js'), path.join(configDir, 'prod.js'), {
+      framework: this.framework
+    })
     creator.template(templateName, 'project.config.json', path.join(this.convertRoot, 'project.config.json'), {
       description,
-      projectName
+      projectName,
+      framework: this.framework
     })
     creator.template(templateName, '.gitignore', path.join(this.convertRoot, '.gitignore'))
     creator.template(templateName, '.editorconfig', path.join(this.convertRoot, '.editorconfig'))
-    creator.template(templateName, '.eslintrc', path.join(this.convertRoot, '.eslintrc'), {
-      typescript: false
+    creator.template(templateName, '.eslintrc.js', path.join(this.convertRoot, '.eslintrc.js'), {
+      typescript: false,
+      framework: this.framework
+    })
+    creator.template(templateName, 'babel.config.js', path.join(this.convertRoot, 'babel.config.js'), {
+      typescript: false,
+      framework: this.framework
     })
     creator.template(templateName, path.join('src', 'index.html'), path.join(this.convertDir, 'index.html'))
     creator.fs.commit(() => {
@@ -784,8 +942,17 @@ export default class Convertor {
   }
 
   run () {
+    // inquirer.prompt([{
+    //   type: 'list',
+    //   name: 'framework',
+    //   message: '你想转换为哪种框架？',
+    //   choices: ['react', 'vue'],
+    //   default: 'react'
+    // }]).then(({ framework }) => {
+    this.framework = 'react'
     this.generateEntry()
     this.traversePages()
     this.generateConfigFiles()
+    // })
   }
 }

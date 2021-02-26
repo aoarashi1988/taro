@@ -1,95 +1,100 @@
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
-import { Component, h, Prop, State, ComponentInterface, Event, EventEmitter } from '@stencil/core'
+import { Component, h, Prop, State, ComponentInterface, Event, EventEmitter, Listen, Element, Host } from '@stencil/core'
 import classNames from 'classnames'
 
 @Component({
-  tag: 'taro-button',
+  tag: 'taro-button-core',
   styleUrl: './style/index.scss'
 })
 export class Button implements ComponentInterface {
   @Prop() disabled: boolean
   @Prop() hoverClass = 'button-hover'
-  @Prop() type = 'default'
+  @Prop() type = ''
   @Prop() hoverStartTime = 20
   @Prop() hoverStayTime = 70
   @Prop() size: string
   @Prop() plain: boolean
   @Prop() loading = false
+  @Prop() formType: 'submit' | 'reset' | null = null
+
+  @Element() el: HTMLElement
+
   @State() hover = false
   @State() touch = false
 
   @Event({
-    eventName: 'click'
-  }) onClick: EventEmitter
+    eventName: 'tarobuttonsubmit'
+  }) onSubmit: EventEmitter
 
   @Event({
-    eventName: 'touchstart'
-  }) onTouchStart: EventEmitter
+    eventName: 'tarobuttonreset'
+  }) onReset: EventEmitter
 
-  @Event({
-    eventName: 'touchend'
-  }) onTouchEnd: EventEmitter
+  @Listen('touchstart')
+  onTouchStart () {
+    if (this.disabled) {
+      return
+    }
+
+    this.touch = true
+    if (this.hoverClass && !this.disabled) {
+      setTimeout(() => {
+        if (this.touch) {
+          this.hover = true
+        }
+      }, this.hoverStartTime)
+    }
+  }
+
+  @Listen('touchend')
+  onTouchEnd () {
+    if (this.disabled) {
+      return
+    }
+
+    this.touch = false
+    if (this.hoverClass && !this.disabled) {
+      setTimeout(() => {
+        if (!this.touch) {
+          this.hover = false
+        }
+      }, this.hoverStayTime)
+    }
+
+    if (this.formType === 'submit') {
+      this.onSubmit.emit()
+    } else if (this.formType === 'reset') {
+      this.onReset.emit()
+    }
+  }
 
   render () {
     const {
       disabled,
       hoverClass,
-      hoverStartTime,
-      hoverStayTime,
+      type,
       size,
       plain,
       loading,
-      type
+      hover
     } = this
 
-    const cls = classNames(
-      'weui-btn',
-      'taro-button',
-      {
-        [`${hoverClass}`]: this.hover && !disabled,
-        [`weui-btn_plain-${type}`]: plain,
-        [`weui-btn_${type}`]: !plain && type,
-        'weui-btn_mini': size === 'mini',
-        'weui-btn_loading': loading,
-        'weui-btn_disabled': disabled
-      }
-    )
-
-    const _onTouchStart = () => {
-      this.touch = true
-      if (hoverClass && !disabled) {
-        setTimeout(() => {
-          if (this.touch) {
-            this.hover = true
-          }
-        }, hoverStartTime)
-      }
-      // this.onTouchStart.emit()
-    }
-
-    const _onTouchEnd = () => {
-      this.touch = false
-      if (hoverClass && !disabled) {
-        setTimeout(() => {
-          if (!this.touch) {
-            this.hover = false
-          }
-        }, hoverStayTime)
-      }
-      // this.onTouchEnd.emit()
-    }
+    const cls = classNames({
+      [`${hoverClass}`]: hover && !disabled
+    })
 
     return (
-      <button
+      <Host
         class={cls}
         type={type}
+        plain={plain}
+        loading={loading}
+        size={size}
         disabled={disabled}
-        onTouchStart={_onTouchStart}
-        onTouchEnd={_onTouchEnd}
       >
         {loading && <i class='weui-loading' />}
         <slot />
-      </button>
+      </Host>
     )
   }
 }

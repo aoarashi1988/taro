@@ -1,9 +1,19 @@
-import VueCtor, { ComponentOptions, VueConstructor, VNode } from 'vue'
-import { AppInstance, VueAppInstance, VueInstance } from './instance'
+/* eslint-disable import/no-duplicates */
+import type { ComponentOptions, VueConstructor, VNode } from 'vue'
+import type VueCtor from 'vue'
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+import type { AppConfig } from '@tarojs/taro'
+import type { AppInstance, VueAppInstance, VueInstance } from './instance'
 import { injectPageInstance } from './common'
 import { Current } from '../current'
 import { document } from '../bom/document'
-import { isFunction, noop, ensure } from '@tarojs/shared'
+import { isFunction, noop, ensure, capitalize, toCamelCase, internalComponents, hasOwn } from '@tarojs/shared'
+import { isBrowser } from '../env'
+import { options } from '../options'
+import { isBooleanStringLiteral } from '@tarojs/shared'
+import { Reconciler } from '../reconciler'
+
+export type V = typeof VueCtor
 
 export function connectVuePage (Vue: VueConstructor, id: string) {
   return (component: ComponentOptions<VueCtor>) => {
@@ -21,10 +31,11 @@ export function connectVuePage (Vue: VueConstructor, id: string) {
     const options: ComponentOptions<VueCtor> = {
       render (h) {
         return h(
-          'root',
+          isBrowser ? 'div' : 'root',
           {
             attrs: {
-              id
+              id,
+              class: isBrowser ? 'taro_page' : ''
             }
           },
           [
@@ -38,15 +49,64 @@ export function connectVuePage (Vue: VueConstructor, id: string) {
   }
 }
 
-let Vue
-// webpack 开发模式不会执行 tree-shaking，因此我们需要做此判断
-if (process.env.FRAMEWORK === 'vue') {
-  const v = require('vue')
-  Vue = v.default || v
+function setReconciler () {
+  const hostConfig: Partial<Reconciler<VueInstance>> = {
+    getLifecyle (instance, lifecycle) {
+      return instance.$options[lifecycle]
+    },
+    removeAttribute (dom, qualifiedName) {
+      const compName = capitalize(toCamelCase(dom.tagName.toLowerCase()))
+      if (
+        compName in internalComponents &&
+        hasOwn(internalComponents[compName], qualifiedName) &&
+        isBooleanStringLiteral(internalComponents[compName][qualifiedName])
+      ) {
+        // avoid attribute being removed because set false value in vue
+        dom.setAttribute(qualifiedName, false)
+      } else {
+        delete dom.props[qualifiedName]
+      }
+    }
+  }
+
+  if (isBrowser) {
+    hostConfig.createPullDownComponent = (el, path, vue: VueConstructor) => {
+      const injectedPage = vue.extend({
+        props: {
+          tid: String
+        },
+        mixins: [el as ComponentOptions<Vue>, {
+          created () {
+            injectPageInstance(this, path)
+          }
+        }]
+      })
+
+      const options: ComponentOptions<Vue> = {
+        name: 'PullToRefresh',
+        render (h) {
+          return h('taro-pull-to-refresh', { class: ['hydrated'] }, [h(injectedPage, this.$slots.default)])
+        }
+      }
+
+      return options
+    }
+
+    hostConfig.findDOMNode = (el) => {
+      return el.$el as any
+    }
+  }
+
+  options.reconciler(hostConfig)
 }
 
-export function createVueApp (App: VueInstance) {
+let Vue
+
+export function createVueApp (App: ComponentOptions<VueCtor>, vue: V, config: AppConfig) {
+  Vue = vue
   ensure(!!Vue, '构建 Vue 项目请把 process.env.FRAMEWORK 设置为 \'vue\'')
+
+  setReconciler()
 
   Vue.config.getTagNamespace = noop
 
@@ -60,8 +120,7 @@ export function createVueApp (App: VueInstance) {
         const page = pages.pop()!
         elements.push(page(h))
       }
-
-      return h(App.$options, { ref: 'app' }, elements.slice())
+      return h(App, { ref: 'app' }, elements.slice())
     },
     methods: {
       mount (component: ComponentOptions<VueCtor>, id: string, cb: () => void) {
@@ -87,37 +146,65 @@ export function createVueApp (App: VueInstance) {
     }
   })
 
-  // comp.$options
-
-  class AppConfig implements AppInstance {
-    onLaunch () {
-      wrapper.$mount(document.getElementById('app') as any)
-      appInstance = wrapper.$refs.app as VueAppInstance
-    }
-
-    onShow (options: unknown) {
-      if (appInstance != null && isFunction(appInstance.$options.onShow)) {
-        appInstance.$options.onShow.call(appInstance, options)
-      }
-    }
-
-    onHide (options: unknown) {
-      if (appInstance != null && isFunction(appInstance.$options.onHide)) {
-        appInstance.$options.onHide.call(appInstance, options)
-      }
-    }
-
+  const app: AppInstance = Object.create({
     mount (component: ComponentOptions<VueCtor>, id: string, cb: () => void) {
       const page = connectVuePage(Vue, id)(component)
       wrapper.mount(page, id, cb)
-    }
+    },
 
     unmount (id: string, cb: () => void) {
       wrapper.unmount(id, cb)
     }
-  }
+  }, {
+    config: {
+      writable: true,
+      enumerable: true,
+      configurable: true,
+      value: config
+    },
 
-  Current.app = new AppConfig()
+    onLaunch: {
+      writable: true,
+      enumerable: true,
+      value (options) {
+        Current.router = {
+          params: options?.query,
+          ...options
+        }
+        wrapper.$mount(document.getElementById('app') as any)
+        appInstance = wrapper.$refs.app as VueAppInstance
+        if (appInstance != null && isFunction(appInstance.$options.onLaunch)) {
+          appInstance.$options.onLaunch.call(appInstance, options)
+        }
+      }
+    },
+
+    onShow: {
+      writable: true,
+      enumerable: true,
+      value (options) {
+        Current.router = {
+          params: options?.query,
+          ...options
+        }
+        if (appInstance != null && isFunction(appInstance.$options.onShow)) {
+          appInstance.$options.onShow.call(appInstance, options)
+        }
+      }
+    },
+
+    onHide: {
+      writable: true,
+      enumerable: true,
+      value (options) {
+        if (appInstance != null && isFunction(appInstance.$options.onHide)) {
+          appInstance.$options.onHide.call(appInstance, options)
+        }
+      }
+    }
+  })
+
+  Current.app = app
 
   return Current.app
 }

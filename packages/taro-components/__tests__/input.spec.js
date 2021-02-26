@@ -1,5 +1,6 @@
-import * as React from 'nervjs'
-import { Input } from '../h5'
+import React from 'react'
+import ReactDOM from 'react-dom'
+import { Input } from '../h5/react'
 import { waitForChange } from './utils'
 import * as assert from 'assert'
 import $ from 'jquery'
@@ -14,17 +15,12 @@ describe('Input', () => {
    */
   let scratch
 
-  beforeAll(async () => {
+  beforeEach(() => {
     scratch = document.createElement('div')
     document.body.appendChild(scratch)
   })
 
-  beforeEach(async () => {
-    scratch = document.createElement('div')
-    document.body.appendChild(scratch)
-  })
-
-  afterAll(async () => {
+  afterEach(() => {
     scratch.parentNode.removeChild(scratch)
     scratch = null
   })
@@ -72,7 +68,7 @@ describe('Input', () => {
         return (
           <Input
             ref={ref}
-            maxLength={maxLength}
+            maxlength={maxLength}
             disabled={disabled}
             value={value}
             placeholder={placeholder}
@@ -86,7 +82,7 @@ describe('Input', () => {
       }
     }
 
-    React.render(<App />, scratch)
+    ReactDOM.render(<App />, scratch)
 
     /**
      * @type {HTMLElement}
@@ -154,7 +150,7 @@ describe('Input', () => {
       }
     }
 
-    React.render(<App />, scratch)
+    ReactDOM.render(<App />, scratch)
 
     /**
      * @type {HTMLElement}

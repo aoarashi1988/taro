@@ -4,7 +4,7 @@
     "allowJs": true,
     "baseUrl": ".",
     "experimentalDecorators": true,
-    "lib": ["esnext"],
+    "lib": ["esnext", "dom"],
     "module": "commonjs",
     "moduleResolution": "node",
     "noImplicitAny": false,
@@ -14,16 +14,12 @@
     "removeComments": false,
     "rootDir": "./src",
     "skipLibCheck": true,
-    "sourceMap": false,
+    "sourceMap": true,
     "strictNullChecks": true,
     "target": "es2015",
     "traceResolution": false,
     "types": ["jest"]
   },
-  "include": [
-    "./src"
-  ],
-  "exclude": [
-    "./src/__tests__"
-  ]
+  "include": ["src"],
+  "exclude": ["./src/__tests__"]
 }

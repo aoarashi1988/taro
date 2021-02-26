@@ -3,6 +3,26 @@ import { styleProperties } from './style_properties'
 import { TaroElement } from './element'
 import { PROPERTY_THRESHOLD } from '../constants'
 
+function setStyle (this: Style, newVal: string, styleKey: string) {
+  const old = this[styleKey]
+  if (newVal) {
+    this._usedStyleProp.add(styleKey)
+  }
+
+  warn(
+    isString(newVal) && newVal.length > PROPERTY_THRESHOLD,
+    `Style 属性 ${styleKey} 的值数据量过大，可能会影响渲染性能，考虑使用 CSS 类或其它方案替代。`
+  )
+
+  if (old !== newVal) {
+    this._value[styleKey] = newVal
+    this._element.enqueueUpdate({
+      path: `${this._element._path}.${Shortcuts.Style}`,
+      value: this.cssText
+    })
+  }
+}
+
 function initStyle (ctor: typeof Style) {
   const properties = {}
 
@@ -13,28 +33,16 @@ function initStyle (ctor: typeof Style) {
         return this._value[styleKey] || ''
       },
       set (this: Style, newVal: string) {
-        const old = this[styleKey]
-        if (newVal) {
-          this._usedStyleProp.add(styleKey)
-        }
-
-        warn(
-          isString(newVal) && newVal.length > PROPERTY_THRESHOLD,
-          `Style 属性 ${styleKey} 的值数据量过大，可能会影响渲染性能，考虑使用 CSS 类或其它方案替代。`
-        )
-
-        if (old !== newVal) {
-          this._value[styleKey] = newVal
-          this._element.enqueueUpdate({
-            path: `${this._element._path}.${Shortcuts.Style}`,
-            value: this.cssText
-          })
-        }
+        setStyle.call(this, newVal, styleKey)
       }
     }
   }
 
   Object.defineProperties(ctor.prototype, properties)
+}
+
+function isCssVariable (propertyName) {
+  return /^--/.test(propertyName)
 }
 
 export class Style {
@@ -50,12 +58,26 @@ export class Style {
     this._value = {}
   }
 
+  private setCssVariables (styleKey: string) {
+    this.hasOwnProperty(styleKey) || Object.defineProperty(this, styleKey, {
+      enumerable: true,
+      configurable: true,
+      get: () => {
+        return this._value[styleKey] || ''
+      },
+      set: (newVal: string) => {
+        setStyle.call(this, newVal, styleKey)
+      }
+    })
+  }
+
   public get cssText () {
     let text = ''
     this._usedStyleProp.forEach(key => {
       const val = this[key]
       if (!val) return
-      text += `${toDashed(key)}: ${val};`
+      const styleName = isCssVariable(key) ? key : toDashed(key)
+      text += `${styleName}: ${val};`
     })
     return text
   }
@@ -81,7 +103,10 @@ export class Style {
         continue
       }
 
-      const [propName, val] = rule.split(':')
+      // 可能存在 'background: url(http:x/y/z)' 的情况
+      const [propName, ...valList] = rule.split(':')
+      const val = valList.join(':')
+
       if (isUndefined(val)) {
         continue
       }
@@ -90,7 +115,11 @@ export class Style {
   }
 
   public setProperty (propertyName: string, value?: string | null) {
-    propertyName = toCamelCase(propertyName)
+    if (isCssVariable(propertyName)) {
+      this.setCssVariables(propertyName)
+    } else {
+      propertyName = toCamelCase(propertyName)
+    }
     if (isUndefined(value)) {
       return
     }

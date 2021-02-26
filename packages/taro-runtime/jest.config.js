@@ -7,7 +7,16 @@ module.exports = {
   transform: {
     ...tsjPreset.transform
   },
+  transformIgnorePatterns: [
+    'node_modules/(?!(lodash-es)/)'
+  ],
   testURL: 'http://localhost/',
+  collectCoverage: false,
+  coveragePathIgnorePatterns: [
+    'nerv.js',
+    'vue.js',
+    'utils.js'
+  ],
   moduleFileExtensions: [
     'ts',
     'tsx',
@@ -31,8 +40,9 @@ module.exports = {
     'utils'
   ],
   moduleNameMapper: {
-    '@tarojs/shared': path.resolve(__dirname, '..', '..', 'packages/shared/src/index.ts')
+    '@tarojs/shared': path.resolve(__dirname, '..', '..', 'packages/shared/src/index.ts'),
+    '@tarojs/react': path.resolve(__dirname, '..', '..', 'packages/taro-react/dist/index.js')
   },
-  setupFiles: ['<rootDir>/__tests__/setup.js'],
+  // setupFiles: ['<rootDir>/__tests__/setup.js'],
   testMatch: ['**/__tests__/?(*.)+(spec|test).[jt]s?(x)']
 }

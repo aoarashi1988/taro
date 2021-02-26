@@ -1,4 +1,4 @@
-import { findRef } from '../utils/index'
+import { findDOM } from '../utils/index'
 
 /**
  * @typedef {Object} Param
@@ -15,14 +15,10 @@ import { findRef } from '../utils/index'
 /**
  * 获取 canvas 区域隐含的像素数据。
  * @param {Param} object 参数
- * @param {Object} componentInstance 在自定义组件下，当前组件实例的this，以操作组件内 <canvas> 组件
  */
-const canvasGetImageData = ({ canvasId, success, fail, complete, x, y, width, height }, componentInstance) => {
-  const refId = `__taroref_${canvasId}`
-  const component = findRef(refId, componentInstance)
-
+const canvasGetImageData = ({ canvasId, success, fail, complete, x, y, width, height }, inst) => {
   /** @type {HTMLCanvasElement} */
-  const canvas = component.vnode.dom.querySelector(`[canvasId=${canvasId}]`)
+  const canvas = findDOM(inst).querySelector(`canvas[canvas-id="${canvasId}"]`)
 
   try {
     const ctx = canvas.getContext('2d')

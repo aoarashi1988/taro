@@ -65,12 +65,24 @@ declare namespace Taro {
     /**
      * 禁止页面右滑手势返回
      * default: false
-     * @since 微信客户端 7.0.0
      *
      * **注意** 自微信客户端 7.0.5 开始，页面配置中的 disableSwipeBack 属性将不再生效，
      * 详情见[右滑手势返回能力调整](https://developers.weixin.qq.com/community/develop/doc/000868190489286620a8b27f156c01)公告
+     * @since 微信客户端 7.0.0
      */
     disableSwipeBack?: boolean
+    /**
+     * 是否启用分享给好友。
+     *
+     * @default false
+     */
+    enableShareAppMessage?: boolean
+    /**
+     * 是否启用分享到朋友圈。
+     *
+     * @default false
+     */
+    enableShareTimeline?: boolean
   }
 
   interface WindowConfig extends CommonPageConfig {
@@ -91,7 +103,7 @@ declare namespace Taro {
      * 是否允许向下拉拽
      * default: YES
      */
-    allowsBounceVertical?:  'YES' | 'NO'
+    allowsBounceVertical?: 'YES' | 'NO'
   }
 
   interface TarbarList {
@@ -298,6 +310,21 @@ declare namespace Taro {
      * @since 微信客户端 7.0.0
      */
     permission?: Permission
+    /**
+     * 指定使用升级后的weui样式
+     * @since 2.8.0
+     */
+    style?: 'v2'
+    /** 
+     * 配置 darkmode 为 true，即表示当前小程序已适配 DarkMode
+     * @since 2.11.0
+     */
+    darkmode?: boolean
+    /**
+     * 指定 darkmode 变量配置文件 theme.json 路径
+     * @since 2.11.0
+     */
+    themeLocation?: string
   }
 
   interface Config extends PageConfig, AppConfig {
@@ -306,5 +333,6 @@ declare namespace Taro {
     }
     window?: WindowConfig
     cloud?: boolean
+    pageOrientation?: 'auto' | 'portrait' | 'landscape'
   }
 }

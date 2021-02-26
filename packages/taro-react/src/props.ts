@@ -1,6 +1,5 @@
-import { TaroElement, Style } from '@tarojs/runtime'
-import { isFunction, isString, isObject, isNumber } from '@tarojs/shared'
-import { CommonEvent } from '@tarojs/components'
+import { TaroElement, Style, FormElement } from '@tarojs/runtime'
+import { isFunction, isString, isObject, isNumber, internalComponents, capitalize, toCamelCase } from '@tarojs/shared'
 
 export type Props = Record<string, unknown>
 
@@ -18,19 +17,19 @@ export function updateProps (dom: TaroElement, oldProps: Props, newProps: Props)
       setProperty(dom, i, null, oldProps[i])
     }
   }
-
+  const isFormElement = dom instanceof FormElement
   for (i in newProps) {
-    if (oldProps[i] !== newProps[i]) {
+    if (oldProps[i] !== newProps[i] || (isFormElement && i === 'value')) {
       setProperty(dom, i, newProps[i], oldProps[i])
     }
   }
 }
 
-const listeners: Record<string, Record<string, Function>> = {}
-
-function eventProxy (e: CommonEvent) {
-  listeners[e.currentTarget.id][e.type](e)
-}
+// function eventProxy (e: CommonEvent) {
+//   const el = document.getElementById(e.currentTarget.id)
+//   const handlers = el!.__handlers[e.type]
+//   handlers[0](e)
+// }
 
 function setEvent (dom: TaroElement, name: string, value: unknown, oldValue?: unknown) {
   const isCapture = name.endsWith('Capture')
@@ -39,27 +38,32 @@ function setEvent (dom: TaroElement, name: string, value: unknown, oldValue?: un
     eventName = eventName.slice(0, -7)
   }
 
-  if (eventName === 'click') {
+  const compName = capitalize(toCamelCase(dom.tagName.toLowerCase()))
+
+  if (eventName === 'click' && compName in internalComponents) {
     eventName = 'tap'
   }
 
   if (isFunction(value)) {
     if (!oldValue) {
-      dom.addEventListener(eventName, eventProxy, isCapture)
+      dom.addEventListener(eventName, value, isCapture)
     }
-    let events = listeners[dom.uid]
-    if (!events) {
-      events = listeners[dom.uid] = {}
+    if (eventName === 'regionchange') {
+      dom.__handlers.begin[0] = value
+      dom.__handlers.end[0] = value
+    } else {
+      dom.__handlers[eventName][0] = value
     }
-    events[eventName] = value
   } else {
-    dom.removeEventListener(eventName, eventProxy)
-    const events = listeners[dom.uid]
-    delete events[eventName]
+    dom.removeEventListener(eventName, oldValue as any)
   }
 }
 
 function setStyle (style: Style, key: string, value: string | number) {
+  if (key[0] === '-') {
+    style.setProperty(key, value.toString())
+  }
+
   style[key] =
     isNumber(value) && IS_NON_DIMENSIONAL.test(key) === false
       ? value + 'px'
@@ -69,6 +73,9 @@ function setStyle (style: Style, key: string, value: string | number) {
 }
 
 type StyleValue = Record<string, string | number>
+interface DangerouslySetInnerHTML {
+  __html?: string
+}
 
 function setProperty (dom: TaroElement, name: string, value: unknown, oldValue?: unknown) {
   name = name === 'className' ? 'class' : name
@@ -107,10 +114,15 @@ function setProperty (dom: TaroElement, name: string, value: unknown, oldValue?:
     }
   } else if (isEventName(name)) {
     setEvent(dom, name, value, oldValue)
-  } else if (
-    !isFunction(value) &&
-    name !== 'dangerouslySetInnerHTML' // TODO: 实现 innerHTML
-  ) {
+  } else if (name === 'dangerouslySetInnerHTML') {
+    const newHtml = (value as DangerouslySetInnerHTML)?.__html ?? ''
+    const oldHtml = (oldValue as DangerouslySetInnerHTML)?.__html ?? ''
+    if (newHtml || oldHtml) {
+      if (oldHtml !== newHtml) {
+        dom.innerHTML = newHtml
+      }
+    }
+  } else if (!isFunction(value)) {
     if (value == null) {
       dom.removeAttribute(name)
     } else {

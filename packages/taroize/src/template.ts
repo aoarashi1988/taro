@@ -1,11 +1,10 @@
 import { NodePath } from 'babel-traverse'
 import * as t from 'babel-types'
-import { buildRender, buildBlockElement, pascalName } from './utils'
-import { resolve, relative } from 'path'
+import { buildRender, buildBlockElement, pascalName, setting } from './utils'
+import { resolve, relative, extname, dirname } from 'path'
 import * as fs from 'fs'
 import { parseWXML, createWxmlVistor } from './wxml'
 import { errors } from './global'
-import { setting } from './utils'
 
 function isNumeric (n) {
   return !isNaN(parseFloat(n)) && isFinite(n)
@@ -13,11 +12,11 @@ function isNumeric (n) {
 
 const NumberWords = ['z', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k']
 
-function buildTemplateName (name: string) {
+export function buildTemplateName (name: string, pascal = true): string {
   if (/wx/i.test(name)) {
     return buildTemplateName('taro-' + name.slice(2, name.length))
   }
-  const words = pascalName(name + '-tmpl')
+  const words = pascal ? pascalName(name + '-tmpl') : name + '-tmpl'
   // return words
   const str: string[] = []
   for (const word of words) {
@@ -27,6 +26,7 @@ function buildTemplateName (name: string) {
       str.push(word)
     }
   }
+
   return str.join('')
 }
 
@@ -66,22 +66,15 @@ export function parseTemplate (path: NodePath<t.JSXElement>, dirPath: string) {
       render = buildRender(block, [], [])
     } else if (refIds.size === 1) {
       // 只有一个数据源
-      render = buildRender(block, [], Array.from(refIds), firstId)
+      render = buildRender(block, [], Array.from(refIds), [])
     } else {
       // 使用 ...spread
       render = buildRender(block, [], Array.from(refIds), [])
     }
-    const classProp = t.classProperty(t.identifier('options'), t.objectExpression([
-      t.objectProperty(
-        t.identifier('addGlobalClass'),
-        t.booleanLiteral(true)
-      )
-    ])) as any
-    classProp.static = true
     const classDecl = t.classDeclaration(
       t.identifier(className),
-      t.memberExpression(t.identifier('Taro'), t.identifier('Component')),
-      t.classBody([render, classProp]),
+      t.memberExpression(t.identifier('React'), t.identifier('Component')),
+      t.classBody([render]),
       []
     )
     path.remove()
@@ -157,9 +150,10 @@ export function parseTemplate (path: NodePath<t.JSXElement>, dirPath: string) {
   throw new Error('template 标签必须指名 `is` 或 `name` 任意一个标签')
 }
 
-function getWXMLsource (dirPath: string, src: string, type: string) {
+export function getWXMLsource (dirPath: string, src: string, type: string) {
   try {
-    return fs.readFileSync(resolve(dirPath, src), 'utf-8')
+    const file = fs.readFileSync(resolve(dirPath, src), 'utf-8')
+    return file
   } catch (e) {
     errors.push(`找不到这个路径的 wxml: <${type} src="${src}" />，该标签将会被忽略掉`)
     return ''
@@ -173,6 +167,9 @@ export function parseModule (jsx: NodePath<t.JSXElement>, dirPath: string, type:
   if (!src) {
     throw new Error(`${type} 标签必须包含 \`src\` 属性`)
   }
+  if (extname(dirPath)) {
+    dirPath = dirname(dirPath)
+  }
   const value = src.get('value')
   if (!value.isStringLiteral()) {
     throw new Error(`${type} 标签的 src 属性值必须是一个字符串`)
@@ -180,12 +177,12 @@ export function parseModule (jsx: NodePath<t.JSXElement>, dirPath: string, type:
   let srcValue = value.node.value
   if (srcValue.startsWith('/')) {
     const vpath = resolve(setting.rootPath, srcValue.substr(1))
-    if(!fs.existsSync(vpath)) {
+    if (!fs.existsSync(vpath)) {
       throw new Error(`import/include 的 src 请填入相对路径再进行转换：src="${srcValue}"`)
     }
     let relativePath = relative(dirPath, vpath)
     relativePath = relativePath.replace(/\\/g, '/')
-    if(relativePath.indexOf('.') !== 0) {
+    if (relativePath.indexOf('.') !== 0) {
       srcValue = './' + relativePath
     }
     srcValue = relativePath
@@ -210,7 +207,7 @@ export function parseModule (jsx: NodePath<t.JSXElement>, dirPath: string, type:
       jsx.remove()
       return
     }
-    const { wxml } = parseWXML(dirPath, wxmlStr, true)
+    const { wxml } = parseWXML(resolve(dirPath, srcValue), wxmlStr, true)
     try {
       if (wxml) {
         block.children = [wxml as any]

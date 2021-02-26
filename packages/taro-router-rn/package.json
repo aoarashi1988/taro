@@ -11,7 +11,6 @@
   "scripts": {
     "build": "rm -rf ./dist && gulp",
     "dev": "npm run build:static && tsc --watch",
-    "prepack": "npm run build",
     "test": "jest"
   },
   "repository": {
@@ -24,7 +23,7 @@
   "author": "O2Team",
   "license": "MIT",
   "dependencies": {
-    "@types/jest": "^24.0.15",
+    "@types/jest": "^26.0.14",
     "query-string": "^6.1.0",
     "react-navigation": "^2.9.0"
   }

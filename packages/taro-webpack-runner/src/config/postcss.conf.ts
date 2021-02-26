@@ -4,13 +4,11 @@ import * as constparse from 'postcss-plugin-constparse'
 import * as pxtransform from 'postcss-pxtransform'
 import { sync as resolveSync } from 'resolve'
 import { IPostcssOption, TogglableOptions } from '@tarojs/taro/types/compile'
-
-import { isNpmPackage, recursiveMerge } from '../util'
+import { recursiveMerge, isNpmPkg } from '@tarojs/helper'
 
 const defaultAutoprefixerOption = {
   enable: true,
   config: {
-    browsers: ['Android >= 4', 'iOS >= 6'],
     flexbox: 'no-2009'
   }
 }
@@ -22,10 +20,6 @@ const defaultPxtransformOption: {
     platform: 'h5'
   }
 }
-// const defaultCssModulesOption = {
-//   enable: false,
-//   config: {}
-// }
 const defaultConstparseOption = {
   constants: [
     {
@@ -45,7 +39,6 @@ export const getPostcssPlugins = function (appPath: string, {
   deviceRatio,
   postcssOption = {} as IPostcssOption
 }) {
-
   if (designWidth) {
     defaultPxtransformOption.config.designWidth = designWidth
   }
@@ -56,7 +49,6 @@ export const getPostcssPlugins = function (appPath: string, {
 
   const autoprefixerOption = recursiveMerge<TogglableOptions>({}, defaultAutoprefixerOption, postcssOption.autoprefixer)
   const pxtransformOption = recursiveMerge<TogglableOptions>({}, defaultPxtransformOption, postcssOption.pxtransform)
-  // const cssModulesOption = recursiveMerge({}, defaultCssModulesOption, postcssOption.cssModules)
 
   if (autoprefixerOption.enable) {
     plugins.push(autoprefixer(autoprefixerOption.config))
@@ -66,17 +58,13 @@ export const getPostcssPlugins = function (appPath: string, {
     plugins.push(pxtransform(pxtransformOption.config))
   }
 
-  // if (cssModulesOption.enable) {
-  //   plugins.push(modules(cssModulesOption.config))
-  // }
-
   plugins.push(constparse(defaultConstparseOption))
 
   Object.entries(postcssOption).forEach(([pluginName, pluginOption]) => {
     if (optionsWithDefaults.indexOf(pluginName) > -1) return
     if (!pluginOption || !pluginOption.enable) return
 
-    if (!isNpmPackage(pluginName)) {
+    if (!isNpmPkg(pluginName)) {
       // local plugin
       pluginName = path.join(appPath, pluginName)
     }

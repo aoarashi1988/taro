@@ -1,16 +1,36 @@
 {
-  "lerna": "3.16.5",
+  "lerna": "3.20.1",
   "packages": [
-    "packages/shared",
-    "packages/taro-runtime",
-    "packages/taro-mini-runner",
-    "packages/react",
-    "packages/taro-components",
-    "packages/taro-loader",
-    "packages/taro-cli",
+    "packages/babel-plugin-transform-taroapi",
     "packages/babel-preset-taro",
+    "packages/eslint-config-taro",
     "packages/eslint-plugin-taro",
-    "packages/eslint-config-taro"
+    "packages/postcss-plugin-constparse",
+    "packages/postcss-pxtransform",
+    "packages/shared",
+    "packages/taro",
+    "packages/taro-api",
+    "packages/taro-cli",
+    "packages/taro-components",
+    "packages/taro-extend",
+    "packages/taro-h5",
+    "packages/taro-helper",
+    "packages/taro-loader",
+    "packages/taro-mini-runner",
+    "packages/taro-react",
+    "packages/taro-router",
+    "packages/taro-runner-utils",
+    "packages/taro-runtime",
+    "packages/taro-service",
+    "packages/taro-webpack-runner",
+    "packages/taro-with-weapp",
+    "packages/taroize",
+    "packages/taro-weapp",
+    "packages/taro-alipay",
+    "packages/taro-swan",
+    "packages/taro-tt",
+    "packages/taro-qq",
+    "packages/taro-jd"
   ],
   "command": {
     "publish": {
@@ -21,6 +41,6 @@
       "license": "MIT"
     }
   },
-  "version": "1.3.22",
-  "npmClient": "npm"
+  "version": "3.1.0",
+  "npmClient": "yarn"
 }

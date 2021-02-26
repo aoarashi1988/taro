@@ -1,3 +1,4 @@
-import { createComponentConfig } from '@tarojs/runtime'
+/* eslint-disable no-undef */
+import { createRecursiveComponentConfig } from '@tarojs/runtime'
 // @ts-ignore
-Component(createComponentConfig())
+Component(createRecursiveComponentConfig())

@@ -1,11 +1,14 @@
 /* eslint-disable no-dupe-class-members */
-import { isArray, isUndefined, Shortcuts, EMPTY_OBJ, warn, isString } from '@tarojs/shared'
+import { isArray, isUndefined, Shortcuts, EMPTY_OBJ, warn, isString, toCamelCase, isFunction } from '@tarojs/shared'
 import { TaroNode } from './node'
 import { NodeType } from './node_types'
 import { TaroEvent, eventSource } from './event'
-import { isElement } from '../utils'
+import { isElement, isHasExtractProp } from '../utils'
 import { Style } from './style'
-import { PROPERTY_THRESHOLD } from '../constants'
+import { PROPERTY_THRESHOLD, SPECIAL_NODES } from '../constants'
+import { CurrentReconciler } from '../reconciler'
+import { treeToArray } from './tree'
+import { ClassList } from './class-list'
 
 interface Attributes {
   name: string;
@@ -25,6 +28,7 @@ export class TaroElement extends TaroNode {
     super(nodeType || NodeType.ELEMENT_NODE, nodeName)
     this.tagName = nodeName.toUpperCase()
     this.style = new Style(this)
+    CurrentReconciler.onTaroElementCreate?.(this.tagName, nodeType)
   }
 
   public get id () {
@@ -33,6 +37,10 @@ export class TaroElement extends TaroNode {
 
   public set id (val: string) {
     this.setAttribute('id', val)
+  }
+
+  public get classList () {
+    return new ClassList(this.className, this)
   }
 
   public get className () {
@@ -67,10 +75,10 @@ export class TaroElement extends TaroNode {
     this.setAttribute('focus', false)
   }
 
-  public setAttribute (qualifiedName: string, value: string | boolean): void {
+  public setAttribute (qualifiedName: string, value: any): void {
     warn(
       isString(value) && value.length > PROPERTY_THRESHOLD,
-      `元素 ${this.nodeName} 的 属性 ${qualifiedName} 的值数据量过大，可能会影响渲染性能。`
+      `元素 ${this.nodeName} 的 属性 ${qualifiedName} 的值数据量过大，可能会影响渲染性能。考虑降低图片转为 base64 的阈值或在 CSS 中使用 base64。`
     )
 
     if (qualifiedName === 'style') {
@@ -78,24 +86,34 @@ export class TaroElement extends TaroNode {
       qualifiedName = Shortcuts.Style
     } else if (qualifiedName === 'id') {
       eventSource.delete(this.uid)
-      this.uid = value as string
-      eventSource.set(value as string, this)
+      value = String(value)
+      this.props[qualifiedName] = this.uid = value
+      eventSource.set(value, this)
       qualifiedName = 'uid'
     } else {
+      // pure-view => static-view
+      if (this.nodeName === 'view' && !isHasExtractProp(this) && !this.isAnyEventBinded()) {
+        this.enqueueUpdate({
+          path: `${this._path}.${Shortcuts.NodeName}`,
+          value: 'static-view'
+        })
+      }
+
       this.props[qualifiedName] = value as string
       if (qualifiedName === 'class') {
         qualifiedName = Shortcuts.Class
-      }
-      if (qualifiedName.startsWith('data-')) {
+      } else if (qualifiedName.startsWith('data-')) {
         if (this.dataset === EMPTY_OBJ) {
           this.dataset = Object.create(null)
         }
-        this.dataset[qualifiedName.replace(/^data-/, '')] = value
+        this.dataset[toCamelCase(qualifiedName.replace(/^data-/, ''))] = value
       }
     }
 
+    CurrentReconciler.setAttribute?.(this, qualifiedName, value)
+
     this.enqueueUpdate({
-      path: `${this._path}.${qualifiedName}`,
+      path: `${this._path}.${toCamelCase(qualifiedName)}`,
       value
     })
   }
@@ -106,15 +124,26 @@ export class TaroElement extends TaroNode {
     } else {
       delete this.props[qualifiedName]
     }
+
+    CurrentReconciler.removeAttribute?.(this, qualifiedName)
+
     this.enqueueUpdate({
-      path: `${this._path}.${qualifiedName}`,
+      path: `${this._path}.${toCamelCase(qualifiedName)}`,
       value: ''
     })
+
+    if (this.nodeName === 'view' && !isHasExtractProp(this) && !this.isAnyEventBinded()) {
+      // static-view => pure-view
+      this.enqueueUpdate({
+        path: `${this._path}.${Shortcuts.NodeName}`,
+        value: 'pure-view'
+      })
+    }
   }
 
-  public getAttribute (qualifiedName: string): string | null {
+  public getAttribute (qualifiedName: string): string {
     const attr = qualifiedName === 'style' ? this.style.cssText : this.props[qualifiedName]
-    return attr || null
+    return attr ?? ''
   }
 
   public get attributes (): Attributes[] {
@@ -124,15 +153,25 @@ export class TaroElement extends TaroNode {
     return attrs.concat(style ? { name: 'style', value: style } : [])
   }
 
-  public get parentElement () {
-    if (this.parentNode instanceof TaroElement) {
-      return this.parentNode
-    }
-    return null
+  public getElementsByTagName (tagName: string): TaroElement[] {
+    return treeToArray(this, (el) => {
+      return el.nodeName === tagName || (tagName === '*' && this !== el)
+    })
+  }
+
+  public getElementsByClassName (className: string): TaroElement[] {
+    return treeToArray(this, (el) => {
+      const classList = el.classList
+      const classNames = className.trim().split(/\s+/)
+      return classNames.every(c => classList.has(c))
+    })
   }
 
   public dispatchEvent (event: TaroEvent) {
     const cancelable = event.cancelable
+    if (isFunction(CurrentReconciler.modifyDispatchEvent)) {
+      CurrentReconciler.modifyDispatchEvent(event, this.tagName)
+    }
     const listeners = this.__handlers[event.type]
     if (!isArray(listeners)) {
       return
@@ -149,6 +188,10 @@ export class TaroElement extends TaroNode {
       if ((result === false || event._end) && cancelable) {
         event.defaultPrevented = true
       }
+
+      if (event._end && event._stop) {
+        break
+      }
     }
 
     if (event._stop) {
@@ -158,6 +201,19 @@ export class TaroElement extends TaroNode {
     }
 
     return listeners != null
+  }
+
+  public get textContent () {
+    let text = ''
+    for (let i = 0; i < this.childNodes.length; i++) {
+      const element = this.childNodes[i]
+      text += element.textContent
+    }
+    return text
+  }
+
+  public set textContent (text: string) {
+    super.textContent = text
   }
 
   private _stopPropagation (event: TaroEvent) {
@@ -175,6 +231,30 @@ export class TaroElement extends TaroNode {
         const l = listeners[i]
         l._stop = true
       }
+    }
+  }
+
+  public addEventListener (type, handler, options) {
+    const name = this.nodeName
+    if (!this.isAnyEventBinded() && SPECIAL_NODES.indexOf(name) > -1) {
+      this.enqueueUpdate({
+        path: `${this._path}.${Shortcuts.NodeName}`,
+        value: name
+      })
+    }
+
+    super.addEventListener(type, handler, options)
+  }
+
+  public removeEventListener (type, handler) {
+    super.removeEventListener(type, handler)
+
+    const name = this.nodeName
+    if (!this.isAnyEventBinded() && SPECIAL_NODES.indexOf(name) > -1) {
+      this.enqueueUpdate({
+        path: `${this._path}.${Shortcuts.NodeName}`,
+        value: isHasExtractProp(this) ? `static-${name}` : `pure-${name}`
+      })
     }
   }
 }

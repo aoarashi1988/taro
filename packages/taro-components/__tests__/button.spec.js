@@ -1,8 +1,9 @@
-import * as React from 'nervjs'
-import { Button } from '../h5'
+import * as React from 'react'
+import { Button } from '../h5/react'
 import { waitForChange, delay } from './utils'
 import * as assert from 'assert'
 import * as sinon from 'sinon'
+import { mount } from './test-tools'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 const h = React.createElement
@@ -19,33 +20,21 @@ describe('Button', () => {
    */
   let scratch
 
-  beforeAll(async () => {
+  beforeEach(() => {
     scratch = document.createElement('div')
     document.body.appendChild(scratch)
   })
 
-  beforeEach(async () => {
-    scratch.parentNode.removeChild(scratch)
-    scratch = document.createElement('div')
-    document.body.appendChild(scratch)
-  })
-
-  afterAll(async () => {
+  afterEach(() => {
     scratch.parentNode.removeChild(scratch)
     scratch = null
   })
 
   it('props', async () => {
-    const ref = React.createRef()
-
     const size = 'mini'
     const plain = true
     const loading = true
     const disabled = false
-    /**
-     * @type {import('react').ReactInstance}
-     */
-    let instance
 
     class App extends React.Component {
       state = {
@@ -53,11 +42,6 @@ describe('Button', () => {
         plain,
         loading,
         disabled
-      }
-
-      constructor (props) {
-        super(props)
-        instance = this
       }
 
       render () {
@@ -69,7 +53,6 @@ describe('Button', () => {
         } = this.state
         return (
           <Button
-            ref={ref}
             size={size}
             plain={plain}
             loading={loading}
@@ -81,58 +64,42 @@ describe('Button', () => {
       }
     }
 
-    React.render(<App />, scratch)
+    const wrapper = await mount(<App />, scratch)
+    const node = wrapper.node
 
-    /**
-     * @type {HTMLElement}
-     */
-    const node = ref.current
-
-    await waitForChange(node)
-
-    /**
-     * @type {HTMLButtonElement}
-     */
-    const button = node.children[0]
-    assert(button.classList.contains('weui-btn_plain-default'))
-    assert(button.classList.contains('weui-btn-default') === false)
-    assert(button.classList.contains('weui-btn_mini'))
-    assert(button.classList.contains('weui-btn_loading'))
-    assert(button.classList.contains('weui-btn_disabled') === false)
-    const icon = button.getElementsByTagName('i')[0]
+    assert(node.type === '')
+    assert(node.plain === true)
+    assert(node.loading === true)
+    assert(node.size === 'mini')
+    assert(node.disabled === false)
+    const icon = node.getElementsByTagName('i')[0]
     assert(icon.className === 'weui-loading')
-    assert(button.innerHTML.includes('button'))
+    assert(node.textContent === 'button')
 
-    instance.setState({
+    wrapper.setState({
       plain: false
     })
-    await waitForChange(button)
-    assert(!button.classList.contains('weui-btn_plain-default'))
-    assert(button.classList.contains('weui-btn_default'))
+    assert(node.plain === false)
 
-    instance.setState({
+    wrapper.setState({
       loading: false
     })
-    await waitForChange(button)
-    assert(!button.classList.contains('weui-btn_loading'))
+    await waitForChange(icon)
+    assert(node.loading === false)
     assert(icon.parentNode === null)
 
-    instance.setState({
+    wrapper.setState({
       disabled: true
     })
-    await waitForChange(button)
-    assert(button.classList.contains('weui-btn_disabled'))
+    assert(node.disabled === true)
 
-    instance.setState({
+    wrapper.setState({
       size: 'big'
     })
-    await waitForChange(button)
-    assert(button.classList.contains('weui-btn_mini') === false)
+    assert(node.size === 'big')
   })
 
   it('event', async () => {
-    const ref = React.createRef()
-
     const clickSpy = sinon.spy()
     const touchStartSpy = sinon.spy()
     const touchEndSpy = sinon.spy()
@@ -147,22 +114,14 @@ describe('Button', () => {
       }
 
       render () {
-        const {
-          hoverStartTime,
-          hoverStayTime
-        } = this.state
+        const { hoverStartTime, hoverStayTime } = this.state
         return (
           <Button
-            ref={ref}
-            size="fuck"
+            size="fork"
             hoverStartTime={hoverStartTime}
             hoverStayTime={hoverStayTime}
-            onClick={() => {
-              clickSpy()
-            }}
-            onTouchStart={() => {
-              touchStartSpy()
-            }}
+            onClick={() => clickSpy()}
+            onTouchStart={() => touchStartSpy()}
             onTouchEnd={() => touchEndSpy()}
           >
             button
@@ -171,33 +130,25 @@ describe('Button', () => {
       }
     }
 
-    React.render(<App />, scratch)
+    const { node } = await mount(<App />, scratch)
 
-    /**
-     * @type {HTMLElement}
-     */
-    const node = ref.current
-
-    await waitForChange(node)
     assert(node.hoverStartTime === hoverStartTime)
     assert(node.hoverStayTime === hoverStayTime)
     assert(node.hoverClass === 'button-hover')
-    /**
-     * @type {HTMLButtonElement}
-     */
-    const button = node.children[0]
-    button.click()
+
+    node.click()
     assert(clickSpy.callCount === 1)
 
-    fireTouchEvent(button, 'touchstart')
+    fireTouchEvent(node, 'touchstart')
     assert(touchStartSpy.callCount === 1)
+
     await delay(hoverStartTime + 10)
+    assert(node.classList.contains('button-hover'))
 
-    // assert(button.classList.contains('button-hover'))
+    fireTouchEvent(node, 'touchend')
+    assert(touchEndSpy.callCount === 1)
 
-    fireTouchEvent(button, 'touchend')
     await delay(hoverStayTime + 10)
-    assert(button.classList.contains('button-hover') === false)
-    assert(touchStartSpy.callCount === 1)
+    assert(node.classList.contains('button-hover') === false)
   })
 })

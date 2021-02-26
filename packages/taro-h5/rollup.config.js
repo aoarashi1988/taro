@@ -9,7 +9,7 @@ import exportNameOnly from './build/rollup-plugin-export-name-only'
 
 const cwd = __dirname
 const baseConfig = {
-  external: ['nervjs'],
+  external: ['nervjs', '@tarojs/runtime', 'react-dom'],
   output: {
     format: 'cjs',
     sourcemap: false,
@@ -21,7 +21,7 @@ const baseConfig = {
     }),
     resolve({
       preferBuiltins: false,
-      jsnext: true
+      mainFields: ['module', 'js-next', 'main']
     }),
     postcss(),
     babel({

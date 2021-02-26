@@ -23,12 +23,15 @@ const hostConfig: HostConfig<
   TaroText, // TextInstance
   TaroElement, // HydratableInstance
   TaroElement, // PublicInstance
-  object, // HostContext
+  Record<string, any>, // HostContext
   string[], // UpdatePayload
   unknown, // ChildSet
   unknown, // TimeoutHandle
   unknown // NoTimeout
-> = {
+> & {
+  hideInstance (instance: TaroElement): void
+  unhideInstance (instance: TaroElement, props): void
+} = {
   createInstance (type) {
     return document.createElement(type)
   },
@@ -92,6 +95,19 @@ const hostConfig: HostConfig<
 
   commitUpdate (dom, _payload, _type, oldProps, newProps) {
     updateProps(dom, oldProps, newProps)
+  },
+
+  hideInstance (instance) {
+    const style = instance.style
+    style.setProperty('display', 'none')
+  },
+
+  unhideInstance (instance, props) {
+    const styleProp = props.style
+    let display = styleProp?.hasOwnProperty('display') ? styleProp.display : null
+    display = display == null || typeof display === 'boolean' || display === '' ? '' : ('' + display).trim()
+    // eslint-disable-next-line dot-notation
+    instance.style['display'] = display
   },
 
   shouldSetTextContent: returnFalse,

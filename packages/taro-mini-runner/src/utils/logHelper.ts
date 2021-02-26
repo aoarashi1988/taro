@@ -1,46 +1,21 @@
-import chalk from 'chalk'
 import * as ora from 'ora'
 import { partial, pipe } from 'lodash/fp'
 import * as formatMessages from 'webpack-format-messages'
-import { BUILD_TYPES } from './constants'
-
-// const syntaxErrorLabel = 'Syntax error:'
-
-const LOG_MAP = {
-  [BUILD_TYPES.WEAPP]: {
-    OPEN: '请打开微信小程序开发者工具进行查看'
-  },
-  [BUILD_TYPES.ALIPAY]: {
-    OPEN: '请打开支付宝小程序开发者工具进行查看'
-  },
-  [BUILD_TYPES.QQ]: {
-    OPEN: '请打开 QQ 小程序开发者工具进行查看'
-  },
-  [BUILD_TYPES.SWAN]: {
-    OPEN: '请打开百度智能小程序开发者工具进行查看'
-  },
-  [BUILD_TYPES.TT]: {
-    OPEN: '请打开字节跳动小程序开发者工具进行查看'
-  },
-  [BUILD_TYPES.JD]: {
-    OPEN: '请打开京东小程序开发者工具进行查看'
-  },
-  [BUILD_TYPES.QUICKAPP]: {
-    OPEN: '请按快应用端开发流程 https://taro-docs.jd.com/taro/docs/quick-app.html 进行查看'
-  }
-}
+import { chalk } from '@tarojs/helper'
 
 const getServeSpinner = (() => {
   let spinner
   return () => {
-    if (!spinner) spinner = ora('Starting development server, please wait~')
+    if (!spinner) {
+      spinner = ora('即将开始启动编译，请稍等~')
+      spinner.start()
+    }
     return spinner
   }
 })()
 
 const printCompiling = () => {
   getServeSpinner().text = '正在编译...'
-  getServeSpinner().start()
 }
 
 const printBuildError = (err: Error): void => {
@@ -65,50 +40,50 @@ const printBuildError = (err: Error): void => {
   console.log()
 }
 
-const printSuccess = (buildAdapter: BUILD_TYPES) => {
+const printSuccess = () => {
   getServeSpinner().stopAndPersist({
     symbol: '✅ ',
-    text: isFirst ? chalk.green(`编译成功，${LOG_MAP[buildAdapter].OPEN}\n`) : chalk.green('编译成功\n')
+    text: chalk.green(`编译成功 ${new Date().toLocaleString()}\n`)
   })
 }
 
 export const printPrerenderSuccess = (path: string) => {
   getServeSpinner().stopAndPersist({
     symbol: '🚀 ',
-    text: chalk.green(`页面 ${path} 预渲染成功`)
+    text: chalk.green(`页面 ${path} 预渲染成功 ${new Date().toLocaleString()}`)
   })
 }
 
 export const printPrerenderFail = (path: string) => {
   getServeSpinner().stopAndPersist({
     symbol: '⚠️ ',
-    text: chalk.yellow(`页面 ${path} 预渲染失败：`)
+    text: chalk.yellow(`${new Date().toLocaleString()} 页面 ${path} 预渲染失败：`)
   })
 }
 
 const printWarning = () => {
   getServeSpinner().stopAndPersist({
     symbol: '⚠️ ',
-    text: chalk.yellow('编译警告.\n')
+    text: chalk.yellow(`编译警告. ${new Date().toLocaleString()}\n`)
   })
 }
 
 const printFailed = () => {
   getServeSpinner().stopAndPersist({
     symbol: '🙅  ',
-    text: chalk.red('编译失败.\n')
+    text: chalk.red(`编译失败. ${new Date().toLocaleString()}\n`)
   })
 }
 
 const printWhenBeforeCompile = compiler => {
-  compiler.hooks.beforeCompile.tap('taroBeforeCompile', filepath => {
+  compiler.hooks.beforeCompile.tap('taroBeforeCompile', () => {
     printCompiling()
   })
   return compiler
 }
 
 const printWhenInvalid = compiler => {
-  compiler.hooks.invalid.tap('taroInvalid', filepath => {
+  compiler.hooks.invalid.tap('taroInvalid', () => {
     printCompiling()
   })
   return compiler
@@ -123,7 +98,7 @@ const printWhenFailed = compiler => {
 
 let isFirst = true
 const printWhenFirstDone = (compiler) => {
-  compiler.hooks.done.tap('taroDone', stats => {
+  compiler.hooks.done.tap('taroDone', () => {
     if (isFirst) {
       isFirst = false
       getServeSpinner().clear()
@@ -135,12 +110,12 @@ const printWhenFirstDone = (compiler) => {
 
 const _printWhenDone = ({
   verbose = false
-}, buildAdapter, compiler) => {
+}, compiler) => {
   compiler.hooks.done.tap('taroDone', stats => {
     const { errors, warnings } = formatMessages(stats)
 
     if (!stats.hasErrors() && !stats.hasWarnings()) {
-      printSuccess(buildAdapter)
+      printSuccess()
     }
 
     if (stats.hasErrors()) {
@@ -171,11 +146,11 @@ const printWhenDone = partial(_printWhenDone, [{ verbose: false }])
 
 const printWhenDoneVerbosely = partial(_printWhenDone, [{ verbose: true }])
 
-const bindDevLogger = (compiler, buildAdapter: BUILD_TYPES) => {
+const bindDevLogger = compiler => {
   console.log()
   pipe(
     printWhenBeforeCompile,
-    partial(printWhenDone, [buildAdapter]),
+    printWhenDone,
     printWhenFailed,
     printWhenInvalid,
     printWhenFirstDone
@@ -183,11 +158,11 @@ const bindDevLogger = (compiler, buildAdapter: BUILD_TYPES) => {
   return compiler
 }
 
-const bindProdLogger = (compiler, buildAdapter: BUILD_TYPES) => {
+const bindProdLogger = compiler => {
   console.log()
   pipe(
     printWhenBeforeCompile,
-    partial(printWhenDoneVerbosely, [buildAdapter]),
+    printWhenDoneVerbosely,
     printWhenFailed
   )(compiler)
   return compiler

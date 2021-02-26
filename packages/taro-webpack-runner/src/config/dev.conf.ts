@@ -1,32 +1,36 @@
 import * as path from 'path'
 import { get, mapValues, merge } from 'lodash'
-
+import { FRAMEWORK_MAP } from '@tarojs/helper'
 import { addLeadingSlash, addTrailingSlash } from '../util'
 import {
   getCopyWebpackPlugin,
   getDefinePlugin,
   getDevtool,
-  getHotModuleReplacementPlugin,
   getHtmlWebpackPlugin,
   getMiniCssExtractPlugin,
+  getMainPlugin,
+  getFastRefreshPlugin,
   getModule,
   getOutput,
   processEnvOption
 } from '../util/chain'
 import { BuildConfig } from '../util/types'
 import getBaseChain from './base.conf'
+import { customVueChain } from './vue'
+import { customVue3Chain } from './vue3'
 
 const emptyObj = {}
 
 export default function (appPath: string, config: Partial<BuildConfig>): any {
-  const chain = getBaseChain(appPath)
+  const chain = getBaseChain(appPath, config)
   const {
-    alias = emptyObj,
+    alias = {},
     copy,
     entry = emptyObj,
+    entryFileName = 'app',
     output = emptyObj,
-    sourceRoot = '',
-    outputRoot,
+    sourceRoot = 'src',
+    outputRoot = 'dist',
     publicPath = '',
     staticDirectory = 'static',
     chunkDirectory = 'chunk',
@@ -35,6 +39,7 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
     designWidth = 750,
     deviceRatio,
     enableSourceMap = true,
+    sourceMapType,
     enableExtract = false,
 
     defineConstants = emptyObj,
@@ -51,13 +56,21 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
     miniCssExtractPluginOption = emptyObj,
     esnextModules = [],
 
-    postcss = emptyObj,
-    babel
+    postcss = emptyObj
   } = config
-
+  const sourceDir = path.join(appPath, sourceRoot)
+  const outputDir = path.join(appPath, outputRoot)
   const plugin = {} as any
 
   const isMultiRouterMode = get(router, 'mode') === 'multi'
+
+  plugin.mainPlugin = getMainPlugin({
+    framework: config.framework,
+    entryFileName,
+    sourceDir,
+    outputDir,
+    routerConfig: router
+  })
 
   if (enableExtract) {
     plugin.miniCssExtractPlugin = getMiniCssExtractPlugin([
@@ -88,13 +101,21 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
     }])
   }
   plugin.definePlugin = getDefinePlugin([processEnvOption(env), defineConstants])
-  plugin.hotModuleReplacementPlugin = getHotModuleReplacementPlugin()
+
+  if (config.devServer?.hot !== false) {
+    // 默认开启 fast-refresh
+    plugin.fastRefreshPlugin = getFastRefreshPlugin()
+  }
 
   const mode = 'development'
 
+  if (config.framework === FRAMEWORK_MAP.REACT || config.framework === FRAMEWORK_MAP.NERV) {
+    alias['@tarojs/components$'] = '@tarojs/components/dist-h5/react'
+  }
+
   chain.merge({
     mode,
-    devtool: getDevtool([enableSourceMap]),
+    devtool: getDevtool({ enableSourceMap, sourceMapType }),
     entry,
     output: getOutput(appPath, [{
       outputRoot,
@@ -119,7 +140,6 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
       esnextModules,
 
       postcss,
-      babel,
       staticDirectory
     }),
     plugin,
@@ -127,6 +147,20 @@ export default function (appPath: string, config: Partial<BuildConfig>): any {
       noEmitOnErrors: true
     }
   })
+
+  switch (config.framework) {
+    case FRAMEWORK_MAP.VUE:
+      customVueChain(chain, {
+        styleLoaderOption
+      })
+      break
+    case FRAMEWORK_MAP.VUE3:
+      customVue3Chain(chain, {
+        styleLoaderOption
+      })
+      break
+    default:
+  }
 
   return chain
 }

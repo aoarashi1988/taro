@@ -1,24 +1,43 @@
 const path = require('path')
+const apis = require('@tarojs/taro-h5/dist/taroApis')
 
 module.exports = (_, options = {}) => {
   const presets = []
   const plugins = []
   const isReact = options.framework === 'react'
   const isNerv = options.framework === 'nerv'
+  const isVue = options.framework === 'vue'
+  const isVue3 = options.framework === 'vue3'
   const moduleName = options.framework.charAt(0).toUpperCase() + options.framework.slice(1)
 
-  if (isNerv || isReact) {
+  if (isNerv) {
     presets.push([require('@babel/preset-react'), {
       pragma: `${moduleName}.createElement`,
       pragmaFrag: `${moduleName}.Fragment`
     }])
   }
 
-  if (options.ts) {
-    presets.push(require('@babel/preset-typescript'))
+  if (isReact) {
+    presets.push([require('@babel/preset-react'), {
+      runtime: options.reactJsxRuntime || 'automatic'
+    }])
+    if (process.env.TARO_ENV === 'h5' && process.env.NODE_ENV !== 'production' && options.hot !== false) {
+      plugins.push([require('react-refresh/babel')])
+    }
   }
 
-  const runtimePath = path.dirname(require.resolve('@babel/runtime/package.json'))
+  if (options.ts) {
+    const config = {}
+    if (isNerv || isReact) {
+      config.jsxPragma = moduleName
+    }
+    if (isVue || isVue3) {
+      config.allExtensions = true
+    }
+    presets.push([require('@babel/preset-typescript'), config])
+  }
+
+  const runtimePath = process.env.NODE_ENV === 'jest' || process.env.NODE_ENV === 'test' ? false : path.dirname(require.resolve('@babel/runtime/package.json'))
   const runtimeVersion = require('@babel/runtime/package.json').version
   const {
     loose = false,
@@ -100,11 +119,20 @@ module.exports = (_, options = {}) => {
   plugins.push([require('@babel/plugin-transform-runtime'), {
     regenerator: true,
     corejs: envOptions.corejs,
-    helpers: useBuiltIns === 'usage',
+    helpers: true,
     useESModules: process.env.NODE_ENV !== 'test',
     absoluteRuntime,
     version
   }])
+
+  if (process.env.TARO_ENV === 'h5') {
+    plugins.push([require('babel-plugin-transform-taroapi'), {
+      packageName: '@tarojs/taro',
+      apis
+    }])
+  } else {
+    plugins.push([require('babel-plugin-dynamic-import-node')])
+  }
 
   return {
     sourceType: 'unambiguous',

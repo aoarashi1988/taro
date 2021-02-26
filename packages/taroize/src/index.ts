@@ -1,16 +1,18 @@
 import * as t from 'babel-types'
 import { parseWXML } from './wxml'
 import { parseScript } from './script'
-import { parseJSON } from './json'
 import { errors, resetGlobals, THIRD_PARTY_COMPONENTS } from './global'
 import { setting } from './utils'
+import { parseVue } from './vue'
 
 interface Option {
   json?: string,
   script?: string,
   wxml?: string,
   path: string
-  rootPath: string
+  rootPath: string,
+  framework: 'react' | 'vue'
+  isApp?: boolean
 }
 
 export function parse (option: Option) {
@@ -27,10 +29,18 @@ export function parse (option: Option) {
       }
     }
   }
+
+  if (option.framework === 'vue') {
+    const result = parseVue(option.path, option.wxml || '', option.script)
+    return {
+      ...result,
+      errors
+    }
+  }
+
   const { wxml, wxses, imports, refIds } = parseWXML(option.path, option.wxml)
-  const json = parseJSON(option.json)
   setting.sourceCode = option.script!
-  const ast = parseScript(option.script, wxml as t.Expression, json, wxses, refIds)
+  const ast = parseScript(option.script, wxml as t.Expression, wxses, refIds, option.isApp)
   return {
     ast,
     imports,

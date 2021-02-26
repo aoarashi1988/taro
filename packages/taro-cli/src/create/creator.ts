@@ -43,7 +43,7 @@ interface IMemFsEditor {
     space?: string | number | undefined
   ): string;
   append(filePath: string, contents: string | Buffer, options?: IAppendOptions): string | Buffer;
-  copyTpl(from: string, to: string, context: object, templateOptions: object);
+  copyTpl(from: string, to: string, context: Record<any, any>, templateOptions: Record<any, any>);
   commit(cb: () => void);
 }
 
@@ -98,10 +98,14 @@ export default class Creator {
     if (filepath.endsWith('package.json.tmpl')) {
       filepath = filepath.replace('.tmpl', '')
     }
+    const basename = path.basename(filepath)
+    if (basename.startsWith('_')) {
+      filepath = path.join(path.dirname(filepath), basename.replace(/^_/, '.'))
+    }
     return filepath
   }
 
-  template (template: string, source: string, dest: string, data?: object, options?) {
+  template (template: string, source: string, dest: string, data?: Record<any, any>, options?) {
     if (typeof dest !== 'string') {
       options = data
       data = dest

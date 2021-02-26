@@ -1,4 +1,5 @@
 import * as path from 'path'
+import { PLATFORMS, FRAMEWORK_MAP, taroJsComponents } from '@tarojs/helper'
 
 import { IBuildConfig } from '../utils/types'
 import {
@@ -6,7 +7,7 @@ import {
   getDefinePlugin,
   processEnvOption,
   getCssoWebpackPlugin,
-  getUglifyPlugin,
+  getTerserPlugin,
   getDevtool,
   getOutput,
   getModule,
@@ -17,45 +18,67 @@ import {
   getEntry
 } from './chain'
 import getBaseConf from './base.conf'
-import { BUILD_TYPES, MINI_APP_FILES, FRAMEWORK_MAP, taroJsComponents } from '../utils/constants'
-import { Targets } from '../plugins/MiniPlugin'
-
-const emptyObj: Record<string, string> = {}
+import { createTarget } from '../plugins/MiniPlugin'
+import { customVueChain } from './vue'
+import { customVue3Chain } from './vue3'
 
 export default (appPath: string, mode, config: Partial<IBuildConfig>): any => {
   const chain = getBaseConf(appPath)
   const {
-    buildAdapter = BUILD_TYPES.WEAPP,
-    alias = emptyObj,
-    entry = emptyObj,
-    output = emptyObj,
+    buildAdapter = PLATFORMS.WEAPP,
+    alias = {},
+    entry = {},
+    output = {},
+    fileType = {
+      style: '.wxss',
+      config: '.json',
+      script: '.js',
+      templ: '.wxml'
+    },
+    globalObject = 'wx',
     outputRoot = 'dist',
     sourceRoot = 'src',
+    isBuildPlugin = false,
+    runtimePath,
+    taroComponentsPath,
 
     designWidth = 750,
     deviceRatio,
-    enableSourceMap = false,
+    enableSourceMap = process.env.NODE_ENV !== 'production',
+    sourceMapType,
+    debugReact = false,
     baseLevel = 16,
     framework = 'nerv',
     prerender,
+    minifyXML = {},
 
-    defineConstants = emptyObj,
-    env = emptyObj,
-    cssLoaderOption = emptyObj,
-    sassLoaderOption = emptyObj,
-    lessLoaderOption = emptyObj,
-    stylusLoaderOption = emptyObj,
-    mediaUrlLoaderOption = emptyObj,
-    fontUrlLoaderOption = emptyObj,
-    imageUrlLoaderOption = emptyObj,
-    miniCssExtractPluginOption = emptyObj,
+    defineConstants = {},
+    env = {},
+    cssLoaderOption = {},
+    sassLoaderOption = {},
+    lessLoaderOption = {},
+    stylusLoaderOption = {},
+    mediaUrlLoaderOption = {},
+    fontUrlLoaderOption = {},
+    imageUrlLoaderOption = {},
+    miniCssExtractPluginOption = {},
 
-    postcss = emptyObj,
+    postcss = {},
     nodeModulesPath,
+    isBuildQuickapp = false,
+    template,
     quickappJSON,
 
     csso,
-    uglify
+    terser,
+    commonChunks,
+    addChunkPages,
+
+    blended,
+
+    modifyMiniConfigs,
+    modifyBuildAssets,
+    onCompilerMake
   } = config
 
   let { copy } = config
@@ -64,7 +87,8 @@ export default (appPath: string, mode, config: Partial<IBuildConfig>): any => {
   const minimizer: any[] = []
   const sourceDir = path.join(appPath, sourceRoot)
   const outputDir = path.join(appPath, outputRoot)
-  if (config.isBuildPlugin) {
+  const taroBaseReg = /@tarojs[\\/][a-z]+/
+  if (isBuildPlugin) {
     const patterns = copy ? copy.patterns : []
     patterns.push({
       from: path.join(sourceRoot, 'plugin', 'doc'),
@@ -79,15 +103,17 @@ export default (appPath: string, mode, config: Partial<IBuildConfig>): any => {
   if (copy) {
     plugin.copyWebpackPlugin = getCopyWebpackPlugin({ copy, appPath })
   }
-  if (framework === FRAMEWORK_MAP.VUE) {
-    const VueLoaderPlugin = require('vue-loader/lib/plugin')
-    plugin.vueLoaderPlugin = {
-      plugin: new VueLoaderPlugin()
-    }
-  }
-  alias[taroJsComponents] = `${taroJsComponents}/mini`
+  alias[taroJsComponents + '$'] = taroComponentsPath || `${taroJsComponents}/mini`
   if (framework === 'react') {
-    alias['react-dom'] = '@tarojs/react'
+    alias['react-dom$'] = '@tarojs/react'
+    if (process.env.NODE_ENV !== 'production' && !debugReact) {
+      alias['react-reconciler$'] = 'react-reconciler/cjs/react-reconciler.production.min.js'
+      // eslint-disable-next-line dot-notation
+      alias['react$'] = 'react/cjs/react.production.min.js'
+      // eslint-disable-next-line dot-notation
+      alias['scheduler$'] = 'scheduler/cjs/scheduler.production.min.js'
+      alias['react/jsx-runtime$'] = 'react/cjs/react-jsx-runtime.production.min.js'
+    }
   }
   if (framework === 'nerv') {
     alias['react-dom'] = 'nervjs'
@@ -100,44 +126,67 @@ export default (appPath: string, mode, config: Partial<IBuildConfig>): any => {
   const entryRes = getEntry({
     sourceDir,
     entry,
-    isBuildPlugin: config.isBuildPlugin
+    isBuildPlugin
   })
+  const defaultCommonChunks = isBuildPlugin
+    ? ['plugin/runtime', 'plugin/vendors', 'plugin/taro', 'plugin/common']
+    : ['runtime', 'vendors', 'taro', 'common']
+  let customCommonChunks = defaultCommonChunks
+  if (typeof commonChunks === 'function') {
+    customCommonChunks = commonChunks(defaultCommonChunks.concat()) || defaultCommonChunks
+  } else if (Array.isArray(commonChunks) && commonChunks.length) {
+    customCommonChunks = commonChunks
+  }
   plugin.definePlugin = getDefinePlugin([constantsReplaceList])
   plugin.miniPlugin = getMiniPlugin({
     sourceDir,
     outputDir,
-    buildAdapter,
     constantsReplaceList,
     nodeModulesPath,
+    isBuildQuickapp,
+    template,
+    fileType,
     quickappJSON,
     designWidth,
     pluginConfig: entryRes!.pluginConfig,
-    isBuildPlugin: !!config.isBuildPlugin,
-    commonChunks: config.isBuildPlugin ? ['plugin/runtime', 'plugin/vendors'] : ['runtime', 'vendors'],
+    isBuildPlugin: Boolean(isBuildPlugin),
+    commonChunks: customCommonChunks,
     baseLevel,
     framework,
-    prerender
+    prerender,
+    addChunkPages,
+    modifyMiniConfigs,
+    modifyBuildAssets,
+    onCompilerMake,
+    minifyXML,
+    runtimePath,
+    blended,
+    alias
   })
 
   plugin.miniCssExtractPlugin = getMiniCssExtractPlugin([{
-    filename: `[name]${MINI_APP_FILES[buildAdapter].STYLE}`,
-    chunkFilename: `[name]${MINI_APP_FILES[buildAdapter].STYLE}`
+    filename: `[name]${fileType.style}`,
+    chunkFilename: `[name]${fileType.style}`
   }, miniCssExtractPluginOption])
 
   plugin.providerPlugin = getProviderPlugin({
     window: ['@tarojs/runtime', 'window'],
-    document: ['@tarojs/runtime', 'document']
+    document: ['@tarojs/runtime', 'document'],
+    navigator: ['@tarojs/runtime', 'navigator'],
+    requestAnimationFrame: ['@tarojs/runtime', 'requestAnimationFrame'],
+    cancelAnimationFrame: ['@tarojs/runtime', 'cancelAnimationFrame'],
+    Element: ['@tarojs/runtime', 'TaroElement']
   })
 
   const isCssoEnabled = !((csso && csso.enable === false))
 
-  const isUglifyEnabled = !((uglify && uglify.enable === false))
+  const isTerserEnabled = !((terser && terser.enable === false))
 
   if (mode === 'production') {
-    if (isUglifyEnabled) {
-      minimizer.push(getUglifyPlugin([
+    if (isTerserEnabled) {
+      minimizer.push(getTerserPlugin([
         enableSourceMap,
-        uglify ? uglify.config : {}
+        terser ? terser.config : {}
       ]))
     }
 
@@ -146,25 +195,30 @@ export default (appPath: string, mode, config: Partial<IBuildConfig>): any => {
       plugin.cssoWebpackPlugin = getCssoWebpackPlugin([cssoConfig])
     }
   }
+
   chain.merge({
     mode,
-    devtool: getDevtool(enableSourceMap),
+    devtool: getDevtool(enableSourceMap, sourceMapType),
     entry: entryRes!.entry,
     output: getOutput(appPath, [{
       outputRoot,
       publicPath: '/',
-      buildAdapter
+      globalObject
     }, output]),
-    target: Targets[buildAdapter],
+    target: createTarget({
+      framework
+    }),
     resolve: { alias },
     module: getModule(appPath, {
-      // sourceDir,
+      sourceDir,
 
       buildAdapter,
+      isBuildQuickapp,
       // constantsReplaceList,
       designWidth,
       deviceRatio,
       enableSourceMap,
+      compile: config.compile || {},
 
       cssLoaderOption,
       lessLoaderOption,
@@ -174,23 +228,55 @@ export default (appPath: string, mode, config: Partial<IBuildConfig>): any => {
       imageUrlLoaderOption,
       mediaUrlLoaderOption,
 
-      postcss
-      // babel
+      postcss,
+      fileType
     }),
     plugin,
     optimization: {
       usedExports: true,
       minimizer,
       runtimeChunk: {
-        name: config.isBuildPlugin ? 'plugin/runtime' : 'runtime'
+        name: isBuildPlugin ? 'plugin/runtime' : 'runtime'
       },
       splitChunks: {
         chunks: 'all',
         maxInitialRequests: Infinity,
         minSize: 0,
-        name: config.isBuildPlugin ? 'plugin/vendors' : 'vendors'
+        cacheGroups: {
+          common: {
+            name: isBuildPlugin ? 'plugin/common' : 'common',
+            minChunks: 2,
+            priority: 1
+          },
+          vendors: {
+            name: isBuildPlugin ? 'plugin/vendors' : 'vendors',
+            minChunks: 2,
+            test: module => {
+              return /[\\/]node_modules[\\/]/.test(module.resource)
+            },
+            priority: 10
+          },
+          taro: {
+            name: isBuildPlugin ? 'plugin/taro' : 'taro',
+            test: module => {
+              return taroBaseReg.test(module.context)
+            },
+            priority: 100
+          }
+        }
       }
     }
   })
+
+  switch (framework) {
+    case FRAMEWORK_MAP.VUE:
+      customVueChain(chain)
+      break
+    case FRAMEWORK_MAP.VUE3:
+      customVue3Chain(chain)
+      break
+    default:
+  }
+
   return chain
 }
